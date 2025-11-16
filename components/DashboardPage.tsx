@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ArrowLeftOnRectangleIcon } from './icons/ArrowLeftOnRectangleIcon';
 import { ChartBarIcon } from './icons/ChartBarIcon';
 import { UsersIcon } from './icons/UsersIcon';
@@ -8,11 +8,13 @@ import { PencilIcon } from './icons/PencilIcon';
 import { TrashIcon } from './icons/TrashIcon';
 import { ClipboardIcon } from './icons/ClipboardIcon';
 import Modal from './Modal';
+import { supabase } from '../lib/supabaseClient';
+import { CheckCircleIcon } from './icons/CheckCircleIcon';
 
-// --- TYPE DEFINITIONS ---
+// --- TYPE DEFINITIONS (camelCase for UI) ---
 interface Registrant {
     id: number;
-    name: string;
+    fullName: string;
     nik: string;
     religion: string;
     contractType: string;
@@ -23,7 +25,7 @@ interface Registrant {
     agency: string;
     department: string;
     stationId: string;
-    date: string;
+    createdAt: string;
 }
 
 interface Mutation {
@@ -31,30 +33,167 @@ interface Mutation {
     opsId: string;
     fullName: string;
     role: string;
-    date: string;
+    createdAt: string;
 }
 
-// --- INITIAL DATA (DATABASE SIMULATION) ---
-const initialRegistrantsData: Registrant[] = [
-    { id: 1, name: 'Budi Santoso', nik: '3201234567890001', phone: '081234567890', religion: 'Islam', bankName: 'BCA', bankAccountName: 'Budi Santoso', bankAccountNumber: '1234567890', contractType: 'Daily Worker Vendor - NEXUS', agency: 'NEXUS', department: 'SOC Operator', stationId: '14461 (Sunter DC)', date: '2023-10-27' },
-    { id: 2, name: 'Ani Yudhoyono', nik: '3201234567890002', phone: '082345678901', religion: 'Kristen Protestan', bankName: 'Mandiri', bankAccountName: 'Ani Yudhoyono', bankAccountNumber: '0987654321', contractType: 'Daily Worker Vendor - NEXUS', agency: 'NEXUS', department: 'SOC Operator', stationId: '14461 (Sunter DC)', date: '2023-10-27' },
-    { id: 3, name: 'Citra Kirana', nik: '3201234567890003', phone: '083456789012', religion: 'Katolik', bankName: 'BRI', bankAccountName: 'Citra Kirana', bankAccountNumber: '1122334455', contractType: 'Daily Worker Vendor - NEXUS', agency: 'NEXUS', department: 'SOC Operator', stationId: '14461 (Sunter DC)', date: '2023-10-26' },
-];
+// --- Data Table Component (Moved outside to prevent re-creation) ---
+const DataTable: React.FC<{ 
+    title: string; 
+    data: any[]; 
+    type: 'registrant' | 'mutation';
+    searchTerm: string;
+    setSearchTerm: (term: string) => void;
+    handleCopy: (data: any, type: 'registrant' | 'mutation') => void;
+    openModal: (type: 'view' | 'edit' | 'delete', data: any, dataType: 'registrant' | 'mutation') => void;
+}> = ({ title, data, type, searchTerm, setSearchTerm, handleCopy, openModal }) => {
+    const headers = type === 'registrant' ? ['Nama Lengkap', 'NIK', 'No. WhatsApp'] : ['OpsID', 'Nama Lengkap', 'Role Diajukan'];
+    
+    // State to give feedback on copy action
+    const [copiedId, setCopiedId] = useState<number | null>(null);
 
-const initialMutationData: Mutation[] = [
-    { id: 1, opsId: 'NXS-001', fullName: 'Eko Prabowo', role: 'Daily Worker', date: '2023-10-27' },
-    { id: 2, opsId: 'NXS-002', fullName: 'Fajar Nugraha', role: 'Daily Worker', date: '2023-10-26' },
-];
+    const onCopy = (item: any) => {
+        handleCopy(item, type);
+        setCopiedId(item.id);
+        setTimeout(() => setCopiedId(null), 2000); // Reset icon after 2 seconds
+    };
+
+    return (
+        <div>
+            <div className="flex flex-col md:flex-row justify-between items-center mb-4 gap-4">
+                <h2 className="text-2xl font-bold text-slate-800">{title}</h2>
+                <input
+                    type="search"
+                    placeholder="Cari..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full md:w-auto px-4 py-2 bg-slate-800 border border-slate-600 placeholder-slate-400 text-white rounded-lg shadow-sm focus:ring-orange-500 focus:border-orange-500"
+                />
+            </div>
+            <div className="overflow-x-auto bg-white rounded-lg shadow">
+                <table className="min-w-full leading-normal">
+                    <thead>
+                        <tr>
+                            {headers.map(h => <th key={h} className="px-5 py-3 border-b-2 border-orange-200 bg-orange-100 text-left text-xs font-semibold text-orange-800 uppercase tracking-wider">{h}</th>)}
+                            <th className="px-5 py-3 border-b-2 border-orange-200 bg-orange-100 text-right text-xs font-semibold text-orange-800 uppercase tracking-wider">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {data.length > 0 ? (
+                            data.map(item => (
+                                <tr key={item.id}>
+                                    {type === 'registrant' ? (<>
+                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.fullName}</td>
+                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.nik}</td>
+                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.phone}</td>
+                                    </>) : (<>
+                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.opsId}</td>
+                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.fullName}</td>
+                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.role}</td>
+                                    </>)}
+                                    <td className="px-5 py-4 border-b border-gray-200 text-sm text-right space-x-2">
+                                        <button onClick={() => onCopy(item)} title="Salin" className="text-gray-500 hover:text-blue-600 disabled:opacity-50" disabled={copiedId === item.id}>
+                                            {copiedId === item.id ? <CheckCircleIcon className="w-5 h-5 text-green-500" /> : <ClipboardIcon className="w-5 h-5"/>}
+                                        </button>
+                                        <button onClick={() => openModal('view', item, type)} title="Lihat Detail" className="text-gray-500 hover:text-green-600"><EyeIcon className="w-5 h-5"/></button>
+                                        <button onClick={() => openModal('edit', item, type)} title="Edit" className="text-gray-500 hover:text-yellow-600"><PencilIcon className="w-5 h-5"/></button>
+                                        <button onClick={() => openModal('delete', item, type)} title="Hapus" className="text-gray-500 hover:text-red-600"><TrashIcon className="w-5 h-5"/></button>
+                                    </td>
+                                </tr>
+                            ))
+                        ) : (
+                            <tr>
+                                <td colSpan={headers.length + 1} className="text-center py-10 text-gray-500">
+                                    {searchTerm ? 'Tidak ada hasil yang cocok dengan pencarian Anda.' : 'Tidak ada data untuk ditampilkan.'}
+                                </td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    )
+};
 
 
-// --- Dashboard Component ---
+// --- Dashboard Page Component ---
 const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
     const [activeView, setActiveView] = useState<'dashboard' | 'registrants' | 'mutations'>('dashboard');
-    const [registrants, setRegistrants] = useState<Registrant[]>(initialRegistrantsData);
-    const [mutations, setMutations] = useState<Mutation[]>(initialMutationData);
+    const [registrants, setRegistrants] = useState<Registrant[]>([]);
+    const [mutations, setMutations] = useState<Mutation[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [searchRegistrants, setSearchRegistrants] = useState('');
+    const [searchMutations, setSearchMutations] = useState('');
+    const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
     const [modalState, setModalState] = useState<{ type: 'view' | 'edit' | 'delete' | null; data: any; dataType: 'registrant' | 'mutation' | null }>({ type: null, data: null, dataType: null });
     const [editFormData, setEditFormData] = useState<any>(null);
+
+    const showNotification = (message: string, type: 'success' | 'error') => {
+        setNotification({ message, type });
+        setTimeout(() => setNotification(null), 3000);
+    };
+
+    const fetchRegistrants = useCallback(async () => {
+        const { data, error } = await supabase.from('registrants').select('*').order('created_at', { ascending: false });
+        if (error) {
+            console.error('Error fetching registrants:', error);
+            showNotification('Gagal memuat data pendaftar.', 'error');
+        } else if (data) {
+            const formattedData: Registrant[] = data.map(item => ({
+                id: item.id,
+                fullName: item.full_name,
+                nik: item.nik,
+                religion: item.religion,
+                contractType: item.contract_type,
+                phone: item.phone,
+                bankName: item.bank_name,
+                bankAccountName: item.bank_account_name,
+                bankAccountNumber: item.bank_account_number,
+                agency: item.agency,
+                department: item.department,
+                stationId: item.station_id,
+                createdAt: new Date(item.created_at).toLocaleDateString('id-ID'),
+            }));
+            setRegistrants(formattedData);
+        }
+    }, []);
+
+    const fetchMutations = useCallback(async () => {
+        const { data, error } = await supabase.from('mutations').select('*').order('created_at', { ascending: false });
+        if (error) {
+            console.error('Error fetching mutations:', error);
+            showNotification('Gagal memuat data mutasi.', 'error');
+        } else if (data) {
+             const formattedData: Mutation[] = data.map(item => ({
+                id: item.id,
+                opsId: item.ops_id,
+                fullName: item.full_name,
+                role: item.role,
+                createdAt: new Date(item.created_at).toLocaleDateString('id-ID'),
+            }));
+            setMutations(formattedData);
+        }
+    }, []);
+
+    useEffect(() => {
+        setLoading(true);
+        Promise.all([fetchRegistrants(), fetchMutations()]).finally(() => setLoading(false));
+    }, [fetchRegistrants, fetchMutations]);
+    
+    const filteredRegistrants = useMemo(() => 
+        registrants.filter(r => 
+            r.fullName.toLowerCase().includes(searchRegistrants.toLowerCase()) ||
+            r.nik.toLowerCase().includes(searchRegistrants.toLowerCase()) ||
+            r.phone.toLowerCase().includes(searchRegistrants.toLowerCase())
+    ), [registrants, searchRegistrants]);
+
+    const filteredMutations = useMemo(() => 
+        mutations.filter(m => 
+            m.opsId.toLowerCase().includes(searchMutations.toLowerCase()) ||
+            m.fullName.toLowerCase().includes(searchMutations.toLowerCase()) ||
+            m.role.toLowerCase().includes(searchMutations.toLowerCase())
+    ), [mutations, searchMutations]);
+
 
     // --- CRUD Handlers ---
     const handleCopy = (data: Registrant | Mutation, type: 'registrant' | 'mutation') => {
@@ -62,42 +201,25 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         if (type === 'registrant') {
             const reg = data as Registrant;
             textToCopy = [
-                reg.name,
-                reg.nik,
-                reg.religion,
-                reg.contractType,
-                reg.phone,
-                reg.bankName,
-                reg.bankAccountName,
-                reg.bankAccountNumber,
-                reg.agency,
-                reg.department,
-                reg.stationId,
+                reg.fullName, reg.nik, reg.religion, reg.contractType, reg.contractType, reg.phone,
+                reg.bankName, reg.bankAccountName, reg.bankAccountNumber,
+                reg.agency, reg.department, reg.stationId
             ].join('\t');
         } else {
             const mut = data as Mutation;
-            textToCopy = [
-                mut.opsId,
-                mut.role,
-                mut.fullName,
-            ].join('\t');
+            textToCopy = [mut.opsId, mut.role, mut.role, mut.fullName].join('\t');
         }
         navigator.clipboard.writeText(textToCopy)
-            .then(() => {
-                alert('Data disalin! Siap untuk di-paste ke spreadsheet.');
-            })
+            .then(() => showNotification('Data disalin ke clipboard!', 'success'))
             .catch(err => {
                 console.error('Gagal menyalin data:', err);
-                alert('Gagal menyalin data ke clipboard.');
+                showNotification('Gagal menyalin data.', 'error');
             });
     };
 
-
     const openModal = (type: 'view' | 'edit' | 'delete', data: any, dataType: 'registrant' | 'mutation') => {
         setModalState({ type, data, dataType });
-        if(type === 'edit') {
-            setEditFormData(data);
-        }
+        if(type === 'edit') setEditFormData(data);
     };
     
     const closeModal = () => {
@@ -109,20 +231,45 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         setEditFormData({ ...editFormData, [e.target.name]: e.target.value });
     };
 
-    const handleSaveChanges = () => {
+    const handleSaveChanges = async () => {
+        if (!editFormData) return;
+        const { id, ...rest } = editFormData;
+        
         if (modalState.dataType === 'registrant') {
-            setRegistrants(registrants.map(r => r.id === editFormData.id ? editFormData : r));
-        } else {
-            setMutations(mutations.map(m => m.id === editFormData.id ? editFormData : m));
+            const { fullName, nik, religion, contractType, phone, bankName, bankAccountName, bankAccountNumber, agency, department, stationId } = rest;
+            const { error } = await supabase.from('registrants').update({
+                full_name: fullName, nik, religion, contract_type: contractType, phone,
+                bank_name: bankName, bank_account_name: bankAccountName, bank_account_number: bankAccountNumber,
+                agency, department, station_id: stationId
+            }).eq('id', id);
+            
+            if (error) showNotification('Gagal menyimpan perubahan: ' + error.message, 'error');
+            else await fetchRegistrants();
+
+        } else if (modalState.dataType === 'mutation') {
+            const { opsId, fullName, role } = rest;
+            const { error } = await supabase.from('mutations').update({
+                ops_id: opsId, full_name: fullName, role
+            }).eq('id', id);
+            
+            if (error) showNotification('Gagal menyimpan perubahan: ' + error.message, 'error');
+            else await fetchMutations();
         }
         closeModal();
     };
 
-    const handleDelete = () => {
-        if (modalState.dataType === 'registrant') {
-            setRegistrants(registrants.filter(r => r.id !== modalState.data.id));
+    const handleDelete = async () => {
+        const { data, dataType } = modalState;
+        if (!data || !dataType) return;
+
+        const fromTable = dataType === 'registrant' ? 'registrants' : 'mutations';
+        const { error } = await supabase.from(fromTable).delete().eq('id', data.id);
+
+        if (error) {
+            showNotification('Gagal menghapus data: ' + error.message, 'error');
         } else {
-            setMutations(mutations.filter(m => m.id !== modalState.data.id));
+            if (dataType === 'registrant') await fetchRegistrants();
+            else await fetchMutations();
         }
         closeModal();
     };
@@ -156,71 +303,34 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
     );
 
     const renderContent = () => {
+        if (loading) {
+            return <div className="text-center p-10">Memuat data...</div>;
+        }
+
         switch (activeView) {
             case 'dashboard':
                 return (
                     <div>
                         <h2 className="text-2xl font-bold text-slate-800 mb-4">Ringkasan</h2>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <StatCard title="Total Pengakses Aplikasi" value="1,204" />
                             <StatCard title="Total Pendaftar Baru" value={registrants.length} />
                             <StatCard title="Total Pengajuan Mutasi" value={mutations.length} />
                         </div>
                     </div>
                 );
             case 'registrants':
-                return <DataTable title="Data Pendaftar Baru" data={registrants} type="registrant" />;
+                return <DataTable title="Data Pendaftar Baru" data={filteredRegistrants} type="registrant" searchTerm={searchRegistrants} setSearchTerm={setSearchRegistrants} handleCopy={handleCopy} openModal={openModal} />;
             case 'mutations':
-                return <DataTable title="Data Pengajuan Mutasi" data={mutations} type="mutation" />;
+                return <DataTable title="Data Pengajuan Mutasi" data={filteredMutations} type="mutation" searchTerm={searchMutations} setSearchTerm={setSearchMutations} handleCopy={handleCopy} openModal={openModal}/>;
             default: return null;
         }
-    };
-    
-    const DataTable: React.FC<{ title: string, data: any[], type: 'registrant' | 'mutation'}> = ({ title, data, type }) => {
-        const headers = type === 'registrant' ? ['Nama Lengkap', 'NIK', 'No. WhatsApp'] : ['OpsID', 'Nama Lengkap', 'Role Diajukan'];
-        return (
-            <div>
-                <h2 className="text-2xl font-bold text-slate-800 mb-4">{title}</h2>
-                <div className="overflow-x-auto bg-white rounded-lg shadow">
-                    <table className="min-w-full leading-normal">
-                        <thead>
-                            <tr>
-                                {headers.map(h => <th key={h} className="px-5 py-3 border-b-2 border-orange-300 bg-orange-500 text-left text-xs font-semibold text-gray-800 uppercase tracking-wider">{h}</th>)}
-                                <th className="px-5 py-3 border-b-2 border-orange-300 bg-orange-500 text-right text-xs font-semibold text-gray-800 uppercase tracking-wider">Aksi</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {data.map(item => (
-                                <tr key={item.id}>
-                                    {type === 'registrant' ? (<>
-                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.name}</td>
-                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.nik}</td>
-                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.phone}</td>
-                                    </>) : (<>
-                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.opsId}</td>
-                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.fullName}</td>
-                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.role}</td>
-                                    </>)}
-                                    <td className="px-5 py-4 border-b border-gray-200 text-sm text-right space-x-2">
-                                        <button onClick={() => handleCopy(item, type)} title="Salin" className="text-gray-500 hover:text-blue-600"><ClipboardIcon className="w-5 h-5"/></button>
-                                        <button onClick={() => openModal('view', item, type)} title="Lihat Detail" className="text-gray-500 hover:text-green-600"><EyeIcon className="w-5 h-5"/></button>
-                                        <button onClick={() => openModal('edit', item, type)} title="Edit" className="text-gray-500 hover:text-yellow-600"><PencilIcon className="w-5 h-5"/></button>
-                                        <button onClick={() => openModal('delete', item, type)} title="Hapus" className="text-gray-500 hover:text-red-600"><TrashIcon className="w-5 h-5"/></button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        )
     };
     
     const renderModalContent = () => {
         if (!modalState.type) return null;
         const { type, data, dataType } = modalState;
         
-        const DetailView = ({ item, type }: { item: any; type: 'registrant' | 'mutation' }) => (
+        const DetailView = ({ item }: { item: any }) => (
             <div className="space-y-2 text-sm">
                 {Object.entries(item).map(([key, value]) => (
                     <div key={key} className="grid grid-cols-3">
@@ -235,7 +345,7 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             if (!editFormData) return null;
             return (
                 <form className="space-y-3">
-                    {Object.entries(editFormData).map(([key, value]) => key !== 'id' && (
+                    {Object.entries(editFormData).filter(([key]) => !['id', 'createdAt'].includes(key)).map(([key, value]) => (
                         <div key={key}>
                             <label className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
                             <input
@@ -255,7 +365,7 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             case 'view':
                 return (
                     <Modal isOpen={!!type} onClose={closeModal} title={`Detail ${dataType === 'registrant' ? 'Pendaftar' : 'Mutasi'}`}>
-                        <DetailView item={data} type={dataType!} />
+                        <DetailView item={data} />
                         <button onClick={closeModal} className="mt-6 w-full px-4 py-2 bg-slate-200 text-slate-800 font-semibold rounded-lg hover:bg-slate-300">Tutup</button>
                     </Modal>
                 );
@@ -272,7 +382,7 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             case 'delete':
                 return (
                     <Modal isOpen={!!type} onClose={closeModal} title="Konfirmasi Hapus">
-                        <p>Anda yakin ingin menghapus data untuk <strong>{dataType === 'registrant' ? data.name : data.fullName}</strong>? Tindakan ini tidak dapat diurungkan.</p>
+                        <p>Anda yakin ingin menghapus data untuk <strong>{data.fullName}</strong>? Tindakan ini tidak dapat diurungkan.</p>
                         <div className="mt-6 flex gap-4">
                             <button onClick={closeModal} className="w-full px-4 py-2 bg-slate-200 text-slate-800 font-semibold rounded-lg hover:bg-slate-300">Batal</button>
                             <button onClick={handleDelete} className="w-full px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700">Ya, Hapus</button>
@@ -284,7 +394,7 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
     }
 
     return (
-        <div className="flex min-h-[calc(100vh-150px)] animate-fade-in bg-slate-100 rounded-lg">
+        <div className="flex min-h-[calc(100vh-150px)] animate-fade-in bg-slate-100 rounded-lg relative">
             {/* Sidebar */}
             <aside className="w-72 bg-white p-4 flex flex-col shadow-lg">
                 <nav className="flex-grow space-y-4">
@@ -325,6 +435,13 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             
             {/* Modals */}
             {renderModalContent()}
+            
+            {/* Notification Toast */}
+            {notification && (
+                <div className={`fixed bottom-5 right-5 px-6 py-3 rounded-lg shadow-lg text-white animate-fade-in ${notification.type === 'success' ? 'bg-green-500' : 'bg-red-500'}`}>
+                    {notification.message}
+                </div>
+            )}
         </div>
     );
 };

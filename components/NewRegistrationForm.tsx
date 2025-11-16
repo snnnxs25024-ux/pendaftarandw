@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ArrowLeftIcon } from './icons/ArrowLeftIcon';
 import Modal from './Modal';
 import { WhatsappIcon } from './icons/WhatsappIcon';
+import { supabase } from '../lib/supabaseClient';
 
 interface NewRegistrationFormProps {
   onBack: () => void;
@@ -28,7 +29,7 @@ const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = (props) 
 );
 
 const initialFormData = {
-    name: '',
+    fullName: '',
     nationalId: '',
     religion: '',
     phoneNumber: '',
@@ -44,6 +45,7 @@ const initialFormData = {
 const NewRegistrationForm: React.FC<NewRegistrationFormProps> = ({ onBack }) => {
     const [formData, setFormData] = useState(initialFormData);
     const [error, setError] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -56,25 +58,51 @@ const NewRegistrationForm: React.FC<NewRegistrationFormProps> = ({ onBack }) => 
         }
     };
     
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (formData.nationalId.length !== 16) {
             setError('National ID wajib 16 digit.');
             return;
         }
         setError('');
+        setIsSubmitting(true);
+
+        const { error: supabaseError } = await supabase
+          .from('registrants')
+          .insert([
+            {
+              full_name: formData.fullName,
+              nik: formData.nationalId,
+              religion: formData.religion,
+              phone: formData.phoneNumber,
+              bank_name: formData.bankName,
+              bank_account_name: formData.bankAccountName,
+              bank_account_number: formData.bankAccountNumber,
+              contract_type: formData.contractType,
+              agency: formData.agency,
+              department: formData.department,
+              station_id: formData.stationId
+            }
+          ]);
+        
+        setIsSubmitting(false);
+
+        if (supabaseError) {
+          setError(`Gagal menyimpan data: ${supabaseError.message}`);
+          return;
+        }
+
         setIsModalOpen(true);
     };
 
     const handleWhatsAppRedirect = () => {
-        // Ganti dengan nomor WhatsApp tujuan Anda
         const phoneNumber = '6287787460647';
         const message = `
 Halo Pak Korlap,
 Saya ingin mendaftar sebagai Daily Worker baru.
 
 Berikut data saya:
-- *Nama Lengkap*: ${formData.name}
+- *Nama Lengkap*: ${formData.fullName}
 - *National ID (NIK)*: ${formData.nationalId}
 - *Agama*: ${formData.religion}
 - *No. Telepon*: ${formData.phoneNumber}
@@ -107,8 +135,8 @@ Terima kasih.
       
       <form onSubmit={handleSubmit} className="space-y-4">
         <FormRow>
-            <Label htmlFor="name" required>Nama Lengkap</Label>
-            <Input id="name" name="name" type="text" value={formData.name} onChange={handleChange} required />
+            <Label htmlFor="fullName" required>Nama Lengkap</Label>
+            <Input id="fullName" name="fullName" type="text" value={formData.fullName} onChange={handleChange} required />
         </FormRow>
         <FormRow>
             <Label htmlFor="nationalId" required>NIK KTP (wajib 16 digit)</Label>
@@ -129,7 +157,7 @@ Terima kasih.
         </FormRow>
         <FormRow>
             <Label htmlFor="contractType" required>Contract Type</Label>
-            <Select id="contractType" name="contractType" required disabled>
+            <Select id="contractType" name="contractType" value={formData.contractType} onChange={handleChange} required disabled>
                 <option>{formData.contractType}</option>
             </Select>
         </FormRow>
@@ -151,19 +179,19 @@ Terima kasih.
         </FormRow>
         <FormRow>
             <Label htmlFor="agency" required>Agency</Label>
-            <Select id="agency" name="agency" required disabled>
+            <Select id="agency" name="agency" value={formData.agency} onChange={handleChange} required disabled>
                 <option>{formData.agency}</option>
             </Select>
         </FormRow>
         <FormRow>
             <Label htmlFor="department" required>Department</Label>
-            <Select id="department" name="department" required disabled>
+            <Select id="department" name="department" value={formData.department} onChange={handleChange} required disabled>
                 <option>{formData.department}</option>
             </Select>
         </FormRow>
         <FormRow>
             <Label htmlFor="stationId" required>Attendance Station ID</Label>
-            <Select id="stationId" name="stationId" required disabled>
+            <Select id="stationId" name="stationId" value={formData.stationId} onChange={handleChange} required disabled>
                 <option>{formData.stationId}</option>
             </Select>
         </FormRow>
@@ -172,23 +200,25 @@ Terima kasih.
             <button
                 type="button"
                 onClick={onBack}
-                className="w-full md:w-auto px-6 py-2 text-orange-600 font-semibold border border-orange-600 rounded-lg hover:bg-orange-50 transition-colors flex items-center justify-center space-x-2"
+                disabled={isSubmitting}
+                className="w-full md:w-auto px-6 py-2 text-orange-600 font-semibold border border-orange-600 rounded-lg hover:bg-orange-50 transition-colors flex items-center justify-center space-x-2 disabled:opacity-50"
             >
                 <ArrowLeftIcon className="w-5 h-5" />
                 <span>Kembali</span>
             </button>
             <button
                 type="submit"
-                className="w-full md:w-auto px-8 py-3 bg-orange-600 text-white font-bold rounded-lg shadow-md hover:bg-orange-700 transition-colors"
+                disabled={isSubmitting}
+                className="w-full md:w-auto px-8 py-3 bg-orange-600 text-white font-bold rounded-lg shadow-md hover:bg-orange-700 transition-colors disabled:bg-gray-400"
             >
-                Kirim Pendaftaran
+                {isSubmitting ? 'Mengirim...' : 'Kirim Pendaftaran'}
             </button>
         </div>
       </form>
     </div>
     <Modal isOpen={isModalOpen} onClose={handleCloseModal} title="Pendaftaran Siap Dikonfirmasi">
         <p className="text-gray-600 mb-6 text-center">
-            Data Anda telah kami simpan sementara. Silakan lanjutkan konfirmasi pendaftaran melalui WhatsApp untuk menyelesaikan proses.
+            Data Anda telah berhasil disimpan di database. Silakan lanjutkan konfirmasi melalui WhatsApp.
         </p>
         <div className="flex flex-col gap-4">
             <button
