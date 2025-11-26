@@ -201,7 +201,7 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         if (type === 'registrant') {
             const reg = data as Registrant;
             textToCopy = [
-                reg.fullName, reg.nik, reg.religion, reg.contractType, reg.contractType, reg.phone,
+                reg.fullName, reg.nik, reg.religion, , reg.contractType, reg.phone,
                 reg.bankName, reg.bankAccountName, reg.bankAccountNumber,
                 reg.agency, reg.department, reg.stationId
             ].join('\t');
