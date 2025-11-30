@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { ArrowLeftIcon } from './icons/ArrowLeftIcon';
 import Modal from './Modal';
@@ -67,36 +68,55 @@ const NewRegistrationForm: React.FC<NewRegistrationFormProps> = ({ onBack }) => 
         setError('');
         setIsSubmitting(true);
 
-        const { error: supabaseError } = await supabase
-          .from('registrants')
-          .insert([
-            {
-              full_name: formData.fullName,
-              nik: formData.nationalId,
-              religion: formData.religion,
-              phone: formData.phoneNumber,
-              bank_name: formData.bankName,
-              bank_account_name: formData.bankAccountName,
-              bank_account_number: formData.bankAccountNumber,
-              contract_type: formData.contractType,
-              agency: formData.agency,
-              department: formData.department,
-              station_id: formData.stationId
+        // 1. Cek Duplikat NIK
+        try {
+            const { data: existingData, error: checkError } = await supabase
+                .from('registrants')
+                .select('id')
+                .eq('nik', formData.nationalId)
+                .single();
+
+            if (checkError && checkError.code !== 'PGRST116') { // PGRST116 means no rows found (which is good)
+                 throw checkError;
             }
-          ]);
-        
-        setIsSubmitting(false);
 
-        if (supabaseError) {
-          setError(`Gagal menyimpan data: ${supabaseError.message}`);
-          return;
+            if (existingData) {
+                setError('NIK ini sudah terdaftar. Mohon periksa kembali atau hubungi admin jika ada kesalahan.');
+                setIsSubmitting(false);
+                return;
+            }
+
+            // 2. Insert Data
+            const { error: insertError } = await supabase
+              .from('registrants')
+              .insert([
+                {
+                  full_name: formData.fullName,
+                  nik: formData.nationalId,
+                  religion: formData.religion,
+                  phone: formData.phoneNumber,
+                  bank_name: formData.bankName,
+                  bank_account_name: formData.bankAccountName,
+                  bank_account_number: formData.bankAccountNumber,
+                  contract_type: formData.contractType,
+                  agency: formData.agency,
+                  department: formData.department,
+                  station_id: formData.stationId
+                }
+              ]);
+            
+            if (insertError) throw insertError;
+
+            setIsModalOpen(true);
+
+        } catch (err: any) {
+            setError(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`);
+        } finally {
+            setIsSubmitting(false);
         }
-
-        setIsModalOpen(true);
     };
 
-    const handleWhatsAppRedirect = () => {
-        const phoneNumber = '6287787460647';
+    const handleWhatsAppRedirect = (targetPhoneNumber: string) => {
         const message = `
 Halo Pak Korlap,
 Saya ingin mendaftar sebagai Daily Worker baru.
@@ -118,7 +138,7 @@ Terima kasih.
         `.trim();
 
         const encodedMessage = encodeURIComponent(message);
-        window.open(`https://wa.me/${phoneNumber}?text=${encodedMessage}`, '_blank');
+        window.open(`https://wa.me/${targetPhoneNumber}?text=${encodedMessage}`, '_blank');
     };
 
     const handleCloseModal = () => {
@@ -142,7 +162,7 @@ Terima kasih.
             <Label htmlFor="nationalId" required>NIK KTP (wajib 16 digit)</Label>
             <Input id="nationalId" name="nationalId" type="text" value={formData.nationalId} onChange={handleChange} maxLength={16} minLength={16} required />
         </FormRow>
-        {error && <div className="text-right md:col-start-2 md:col-span-2"><p className="text-red-500 text-sm">{error}</p></div>}
+        
         <FormRow>
             <Label htmlFor="religion" required>Agama</Label>
             <Select id="religion" name="religion" value={formData.religion} onChange={handleChange} required>
@@ -167,7 +187,32 @@ Terima kasih.
         </FormRow>
         <FormRow>
             <Label htmlFor="bankName" required>Nama Bank</Label>
-            <Input id="bankName" name="bankName" type="text" value={formData.bankName} onChange={handleChange} required />
+            <Select id="bankName" name="bankName" value={formData.bankName} onChange={handleChange} required>
+                <option value="" disabled>Pilih Bank</option>
+                <option value="BCA">BCA</option>
+                <option value="BCA Digital">BCA Digital</option>
+                <option value="BCA Syariah">BCA Syariah</option>
+                <option value="BJB">BJB</option>
+                <option value="BJB Syariah">BJB Syariah</option>
+                <option value="BNI">BNI</option>
+                <option value="BRI">BRI</option>
+                <option value="BTN">BTN</option>
+                <option value="BTN UUS">BTN UUS</option>
+                <option value="Bank DKI">Bank DKI</option>
+                <option value="Bank DKI UUS">Bank DKI UUS</option>
+                <option value="Bank Danamon IND. UU Syariah">Bank Danamon IND. UU Syariah</option>
+                <option value="Bank Jago">Bank Jago</option>
+                <option value="Bank Mandiri">Bank Mandiri</option>
+                <option value="Bank Mandiri Taspen">Bank Mandiri Taspen</option>
+                <option value="Bank Panin">Bank Panin</option>
+                <option value="Bank Panin Syariah">Bank Panin Syariah</option>
+                <option value="Bank Permata">Bank Permata</option>
+                <option value="Bank Permata Syariah">Bank Permata Syariah</option>
+                <option value="CIMB Niaga">CIMB Niaga</option>
+                <option value="HSBC">HSBC</option>
+                <option value="Maybank">Maybank</option>
+                <option value="SeaBank">SeaBank</option>
+            </Select>
         </FormRow>
         <FormRow>
             <Label htmlFor="bankAccountName" required>Nama Penerima</Label>
@@ -196,6 +241,13 @@ Terima kasih.
             </Select>
         </FormRow>
 
+        {error && (
+            <div className="p-4 bg-red-100 border-l-4 border-red-500 text-red-700">
+                <p className="font-bold">Error</p>
+                <p>{error}</p>
+            </div>
+        )}
+
         <div className="flex flex-col md:flex-row items-center justify-between pt-8 gap-4">
             <button
                 type="button"
@@ -211,26 +263,39 @@ Terima kasih.
                 disabled={isSubmitting}
                 className="w-full md:w-auto px-8 py-3 bg-orange-600 text-white font-bold rounded-lg shadow-md hover:bg-orange-700 transition-colors disabled:bg-gray-400"
             >
-                {isSubmitting ? 'Mengirim...' : 'Kirim Pendaftaran'}
+                {isSubmitting ? 'Sedang Memproses...' : 'Kirim Pendaftaran'}
             </button>
         </div>
       </form>
     </div>
     <Modal isOpen={isModalOpen} onClose={handleCloseModal} title="Pendaftaran Siap Dikonfirmasi">
-        <p className="text-gray-600 mb-6 text-center">
-            Data Anda telah berhasil disimpan di database. Silakan lanjutkan konfirmasi melalui WhatsApp.
+        <p className="text-gray-600 mb-2 text-center">
+            Data Anda telah berhasil disimpan di database. Silakan pilih salah satu Korlap untuk konfirmasi melalui WhatsApp.
         </p>
-        <div className="flex flex-col gap-4">
+        <div className="bg-orange-50 border border-orange-200 rounded p-3 mb-6 text-center">
+             <p className="text-sm text-orange-800 font-medium italic">
+                Note: wa aja ya jangan telepon pasti di bales
+            </p>
+        </div>
+       
+        <div className="flex flex-col gap-3">
             <button
-                onClick={handleWhatsAppRedirect}
+                onClick={() => handleWhatsAppRedirect('6287787460647')}
                 className="w-full px-6 py-3 bg-green-500 text-white font-bold rounded-lg shadow-md hover:bg-green-600 transition-colors flex items-center justify-center space-x-3"
             >
                 <WhatsappIcon className="w-6 h-6" />
-                <span>Konfirmasi via WhatsApp</span>
+                <span>Hubungi Pak Korlap 1</span>
+            </button>
+            <button
+                onClick={() => handleWhatsAppRedirect('6285890285218')}
+                className="w-full px-6 py-3 bg-green-500 text-white font-bold rounded-lg shadow-md hover:bg-green-600 transition-colors flex items-center justify-center space-x-3"
+            >
+                <WhatsappIcon className="w-6 h-6" />
+                <span>Hubungi Pak Korlap 2</span>
             </button>
             <button
                 onClick={handleCloseModal}
-                className="w-full px-6 py-2 text-slate-700 font-semibold hover:bg-slate-100 transition-colors rounded-lg"
+                className="w-full px-6 py-2 mt-2 text-slate-700 font-semibold hover:bg-slate-100 transition-colors rounded-lg"
             >
                 Tutup dan Kembali
             </button>

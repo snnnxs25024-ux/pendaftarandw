@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ArrowLeftOnRectangleIcon } from './icons/ArrowLeftOnRectangleIcon';
 import { ChartBarIcon } from './icons/ChartBarIcon';
@@ -10,6 +11,7 @@ import { ClipboardIcon } from './icons/ClipboardIcon';
 import Modal from './Modal';
 import { supabase } from '../lib/supabaseClient';
 import { CheckCircleIcon } from './icons/CheckCircleIcon';
+import { WhatsappIcon } from './icons/WhatsappIcon';
 
 // --- TYPE DEFINITIONS (camelCase for UI) ---
 interface Registrant {
@@ -25,6 +27,7 @@ interface Registrant {
     agency: string;
     department: string;
     stationId: string;
+    status: string; // Added status
     createdAt: string;
 }
 
@@ -33,10 +36,11 @@ interface Mutation {
     opsId: string;
     fullName: string;
     role: string;
+    status: string; // Added status
     createdAt: string;
 }
 
-// --- Data Table Component (Moved outside to prevent re-creation) ---
+// --- Data Table Component ---
 const DataTable: React.FC<{ 
     title: string; 
     data: any[]; 
@@ -45,8 +49,12 @@ const DataTable: React.FC<{
     setSearchTerm: (term: string) => void;
     handleCopy: (data: any, type: 'registrant' | 'mutation') => void;
     openModal: (type: 'view' | 'edit' | 'delete', data: any, dataType: 'registrant' | 'mutation') => void;
-}> = ({ title, data, type, searchTerm, setSearchTerm, handleCopy, openModal }) => {
-    const headers = type === 'registrant' ? ['Nama Lengkap', 'NIK', 'No. WhatsApp'] : ['OpsID', 'Nama Lengkap', 'Role Diajukan'];
+    onStatusUpdate: (id: number, newStatus: string, type: 'registrant' | 'mutation') => void;
+}> = ({ title, data, type, searchTerm, setSearchTerm, handleCopy, openModal, onStatusUpdate }) => {
+    // Add Status header
+    const headers = type === 'registrant' 
+        ? ['Status', 'Nama Lengkap', 'NIK', 'No. WhatsApp'] 
+        : ['Status', 'OpsID', 'Nama Lengkap', 'Role Diajukan'];
     
     // State to give feedback on copy action
     const [copiedId, setCopiedId] = useState<number | null>(null);
@@ -55,6 +63,22 @@ const DataTable: React.FC<{
         handleCopy(item, type);
         setCopiedId(item.id);
         setTimeout(() => setCopiedId(null), 2000); // Reset icon after 2 seconds
+    };
+
+    const handleDirectWA = (phone: string) => {
+        // Remove non-numeric chars just in case, though form handles it
+        const cleanPhone = phone.replace(/\D/g, '');
+        window.open(`https://wa.me/${cleanPhone}`, '_blank');
+    };
+
+    const getStatusColor = (status: string) => {
+        const s = status || 'Menunggu';
+        switch (s.toLowerCase()) {
+            case 'diproses': return 'bg-blue-100 text-blue-800 border-blue-200';
+            case 'selesai': return 'bg-green-100 text-green-800 border-green-200';
+            case 'ditolak': return 'bg-red-100 text-red-800 border-red-200';
+            default: return 'bg-yellow-100 text-yellow-800 border-yellow-200'; // Menunggu
+        }
     };
 
     return (
@@ -69,7 +93,8 @@ const DataTable: React.FC<{
                     className="w-full md:w-auto px-4 py-2 bg-slate-800 border border-slate-600 placeholder-slate-400 text-white rounded-lg shadow-sm focus:ring-orange-500 focus:border-orange-500"
                 />
             </div>
-            <div className="overflow-x-auto bg-white rounded-lg shadow">
+            <div className="overflow-x-auto bg-white rounded-lg shadow pb-24 md:pb-0"> 
+                {/* Added pb-24 to allow dropdown space on mobile if needed */}
                 <table className="min-w-full leading-normal">
                     <thead>
                         <tr>
@@ -81,6 +106,23 @@ const DataTable: React.FC<{
                         {data.length > 0 ? (
                             data.map(item => (
                                 <tr key={item.id}>
+                                    <td className="px-5 py-4 border-b border-gray-200 text-sm">
+                                        <div className="relative">
+                                            <select
+                                                value={item.status || 'Menunggu'}
+                                                onChange={(e) => onStatusUpdate(item.id, e.target.value, type)}
+                                                className={`appearance-none block w-full px-3 py-1 pr-8 text-xs font-bold rounded-full border cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-orange-500 ${getStatusColor(item.status)}`}
+                                            >
+                                                <option value="Menunggu">Menunggu</option>
+                                                <option value="Diproses">Diproses</option>
+                                                <option value="Selesai">Selesai</option>
+                                                <option value="Ditolak">Ditolak</option>
+                                            </select>
+                                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
+                                                <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                                            </div>
+                                        </div>
+                                    </td>
                                     {type === 'registrant' ? (<>
                                         <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.fullName}</td>
                                         <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.nik}</td>
@@ -90,12 +132,22 @@ const DataTable: React.FC<{
                                         <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.fullName}</td>
                                         <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.role}</td>
                                     </>)}
-                                    <td className="px-5 py-4 border-b border-gray-200 text-sm text-right space-x-2">
-                                        <button onClick={() => onCopy(item)} title="Salin" className="text-gray-500 hover:text-blue-600 disabled:opacity-50" disabled={copiedId === item.id}>
+                                    <td className="px-5 py-4 border-b border-gray-200 text-sm text-right flex justify-end items-center space-x-2">
+                                        {/* Direct WA Button only for Registrants who have phone numbers */}
+                                        {type === 'registrant' && (
+                                            <button 
+                                                onClick={() => handleDirectWA(item.phone)} 
+                                                title="Hubungi via WhatsApp" 
+                                                className="p-1 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-full transition-colors"
+                                            >
+                                                <WhatsappIcon className="w-5 h-5"/>
+                                            </button>
+                                        )}
+                                        <button onClick={() => onCopy(item)} title="Salin Data" className="text-gray-500 hover:text-blue-600 disabled:opacity-50" disabled={copiedId === item.id}>
                                             {copiedId === item.id ? <CheckCircleIcon className="w-5 h-5 text-green-500" /> : <ClipboardIcon className="w-5 h-5"/>}
                                         </button>
                                         <button onClick={() => openModal('view', item, type)} title="Lihat Detail" className="text-gray-500 hover:text-green-600"><EyeIcon className="w-5 h-5"/></button>
-                                        <button onClick={() => openModal('edit', item, type)} title="Edit" className="text-gray-500 hover:text-yellow-600"><PencilIcon className="w-5 h-5"/></button>
+                                        <button onClick={() => openModal('edit', item, type)} title="Edit Data" className="text-gray-500 hover:text-yellow-600"><PencilIcon className="w-5 h-5"/></button>
                                         <button onClick={() => openModal('delete', item, type)} title="Hapus" className="text-gray-500 hover:text-red-600"><TrashIcon className="w-5 h-5"/></button>
                                     </td>
                                 </tr>
@@ -130,14 +182,14 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
 
     const showNotification = (message: string, type: 'success' | 'error') => {
         setNotification({ message, type });
-        setTimeout(() => setNotification(null), 3000);
+        setTimeout(() => setNotification(null), 5000); // Increased timeout for reading errors
     };
 
     const fetchRegistrants = useCallback(async () => {
         const { data, error } = await supabase.from('registrants').select('*').order('created_at', { ascending: false });
         if (error) {
-            console.error('Error fetching registrants:', error);
-            showNotification('Gagal memuat data pendaftar.', 'error');
+            console.error('Error fetching registrants:', JSON.stringify(error, null, 2));
+            showNotification('Gagal memuat data pendaftar: ' + error.message, 'error');
         } else if (data) {
             const formattedData: Registrant[] = data.map(item => ({
                 id: item.id,
@@ -152,6 +204,7 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                 agency: item.agency,
                 department: item.department,
                 stationId: item.station_id,
+                status: item.status, // Fetch status
                 createdAt: new Date(item.created_at).toLocaleDateString('id-ID'),
             }));
             setRegistrants(formattedData);
@@ -161,14 +214,15 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
     const fetchMutations = useCallback(async () => {
         const { data, error } = await supabase.from('mutations').select('*').order('created_at', { ascending: false });
         if (error) {
-            console.error('Error fetching mutations:', error);
-            showNotification('Gagal memuat data mutasi.', 'error');
+            console.error('Error fetching mutations:', JSON.stringify(error, null, 2));
+            showNotification('Gagal memuat data mutasi: ' + error.message, 'error');
         } else if (data) {
              const formattedData: Mutation[] = data.map(item => ({
                 id: item.id,
                 opsId: item.ops_id,
                 fullName: item.full_name,
                 role: item.role,
+                status: item.status, // Fetch status
                 createdAt: new Date(item.created_at).toLocaleDateString('id-ID'),
             }));
             setMutations(formattedData);
@@ -201,13 +255,17 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         if (type === 'registrant') {
             const reg = data as Registrant;
             textToCopy = [
-                reg.fullName, reg.nik, reg.religion, , reg.contractType, reg.phone,
+                reg.status || 'Menunggu', // Include Status
+                reg.fullName, reg.nik, reg.religion, reg.contractType, reg.phone,
                 reg.bankName, reg.bankAccountName, reg.bankAccountNumber,
                 reg.agency, reg.department, reg.stationId
             ].join('\t');
         } else {
             const mut = data as Mutation;
-            textToCopy = [mut.opsId, mut.role, mut.role, mut.fullName].join('\t');
+            textToCopy = [
+                mut.status || 'Menunggu', // Include Status
+                mut.opsId, mut.role, mut.role, mut.fullName
+            ].join('\t');
         }
         navigator.clipboard.writeText(textToCopy)
             .then(() => showNotification('Data disalin ke clipboard!', 'success'))
@@ -217,9 +275,34 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             });
     };
 
+    // --- New: Handle Quick Status Update ---
+    const handleStatusUpdate = async (id: number, newStatus: string, type: 'registrant' | 'mutation') => {
+        const table = type === 'registrant' ? 'registrants' : 'mutations';
+        
+        // Optimistic UI update (update screen before waiting for DB)
+        if (type === 'registrant') {
+            setRegistrants(prev => prev.map(r => r.id === id ? { ...r, status: newStatus } : r));
+        } else {
+            setMutations(prev => prev.map(m => m.id === id ? { ...m, status: newStatus } : m));
+        }
+
+        const { error } = await supabase.from(table).update({ status: newStatus }).eq('id', id);
+
+        if (error) {
+            console.error('Error updating status:', JSON.stringify(error, null, 2));
+            showNotification(`Gagal memperbarui status: ${error.message || 'Lihat console'}`, 'error');
+            // Revert changes if needed (typically fetchRegistrants will fix it on refresh)
+            if (type === 'registrant') fetchRegistrants(); 
+            else fetchMutations();
+        } else {
+            showNotification(`Status diubah menjadi: ${newStatus}`, 'success');
+        }
+    };
+
     const openModal = (type: 'view' | 'edit' | 'delete', data: any, dataType: 'registrant' | 'mutation') => {
         setModalState({ type, data, dataType });
-        if(type === 'edit') setEditFormData(data);
+        // Ensure status has a default value for edit form
+        if(type === 'edit') setEditFormData({ ...data, status: data.status || 'Menunggu' });
     };
     
     const closeModal = () => {
@@ -227,7 +310,7 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         setEditFormData(null);
     };
 
-    const handleEditFormChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleEditFormChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         setEditFormData({ ...editFormData, [e.target.name]: e.target.value });
     };
 
@@ -235,27 +318,35 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         if (!editFormData) return;
         const { id, ...rest } = editFormData;
         
+        let error = null;
+
         if (modalState.dataType === 'registrant') {
-            const { fullName, nik, religion, contractType, phone, bankName, bankAccountName, bankAccountNumber, agency, department, stationId } = rest;
-            const { error } = await supabase.from('registrants').update({
+            const { fullName, nik, religion, contractType, phone, bankName, bankAccountName, bankAccountNumber, agency, department, stationId, status } = rest;
+            const result = await supabase.from('registrants').update({
                 full_name: fullName, nik, religion, contract_type: contractType, phone,
                 bank_name: bankName, bank_account_name: bankAccountName, bank_account_number: bankAccountNumber,
-                agency, department, station_id: stationId
+                agency, department, station_id: stationId, status // Save status
             }).eq('id', id);
-            
-            if (error) showNotification('Gagal menyimpan perubahan: ' + error.message, 'error');
-            else await fetchRegistrants();
+            error = result.error;
 
         } else if (modalState.dataType === 'mutation') {
-            const { opsId, fullName, role } = rest;
-            const { error } = await supabase.from('mutations').update({
-                ops_id: opsId, full_name: fullName, role
+            const { opsId, fullName, role, status } = rest;
+            const result = await supabase.from('mutations').update({
+                ops_id: opsId, full_name: fullName, role, status // Save status
             }).eq('id', id);
-            
-            if (error) showNotification('Gagal menyimpan perubahan: ' + error.message, 'error');
-            else await fetchMutations();
+            error = result.error;
         }
-        closeModal();
+        
+        if (error) {
+             console.error('Error saving changes:', JSON.stringify(error, null, 2));
+             showNotification('Gagal menyimpan perubahan: ' + error.message, 'error');
+             // Do NOT close modal on error, so user can retry or copy data
+        } else {
+            if (modalState.dataType === 'registrant') await fetchRegistrants();
+            else await fetchMutations();
+            showNotification('Data berhasil diperbarui', 'success');
+            closeModal();
+        }
     };
 
     const handleDelete = async () => {
@@ -266,12 +357,14 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         const { error } = await supabase.from(fromTable).delete().eq('id', data.id);
 
         if (error) {
+            console.error('Error deleting data:', JSON.stringify(error, null, 2));
             showNotification('Gagal menghapus data: ' + error.message, 'error');
         } else {
             if (dataType === 'registrant') await fetchRegistrants();
             else await fetchMutations();
+            showNotification('Data berhasil dihapus', 'success');
+            closeModal();
         }
-        closeModal();
     };
 
     // --- Render Helper Components ---
@@ -319,9 +412,9 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                     </div>
                 );
             case 'registrants':
-                return <DataTable title="Data Pendaftar Baru" data={filteredRegistrants} type="registrant" searchTerm={searchRegistrants} setSearchTerm={setSearchRegistrants} handleCopy={handleCopy} openModal={openModal} />;
+                return <DataTable title="Data Pendaftar Baru" data={filteredRegistrants} type="registrant" searchTerm={searchRegistrants} setSearchTerm={setSearchRegistrants} handleCopy={handleCopy} openModal={openModal} onStatusUpdate={handleStatusUpdate} />;
             case 'mutations':
-                return <DataTable title="Data Pengajuan Mutasi" data={filteredMutations} type="mutation" searchTerm={searchMutations} setSearchTerm={setSearchMutations} handleCopy={handleCopy} openModal={openModal}/>;
+                return <DataTable title="Data Pengajuan Mutasi" data={filteredMutations} type="mutation" searchTerm={searchMutations} setSearchTerm={setSearchMutations} handleCopy={handleCopy} openModal={openModal} onStatusUpdate={handleStatusUpdate} />;
             default: return null;
         }
     };
@@ -345,7 +438,23 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             if (!editFormData) return null;
             return (
                 <form className="space-y-3">
-                    {Object.entries(editFormData).filter(([key]) => !['id', 'createdAt'].includes(key)).map(([key, value]) => (
+                    {/* Status Field specifically */}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Status Proses</label>
+                        <select
+                            name="status"
+                            value={editFormData.status}
+                            onChange={handleEditFormChange}
+                            className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500"
+                        >
+                            <option value="Menunggu">Menunggu</option>
+                            <option value="Diproses">Diproses</option>
+                            <option value="Selesai">Selesai</option>
+                            <option value="Ditolak">Ditolak</option>
+                        </select>
+                    </div>
+
+                    {Object.entries(editFormData).filter(([key]) => !['id', 'createdAt', 'status'].includes(key)).map(([key, value]) => (
                         <div key={key}>
                             <label className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
                             <input

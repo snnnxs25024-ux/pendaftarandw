@@ -53,28 +53,47 @@ const MutationForm: React.FC<MutationFormProps> = ({ onBack }) => {
         setError('');
         setIsSubmitting(true);
         
-        const { error: supabaseError } = await supabase
-          .from('mutations')
-          .insert([
-            {
-              ops_id: formData.opsId,
-              full_name: formData.fullName,
-              role: formData.role
+        try {
+            // 1. Cek Duplikat OpsID
+            const { data: existingData, error: checkError } = await supabase
+                .from('mutations')
+                .select('id')
+                .eq('ops_id', formData.opsId)
+                .single();
+
+            if (checkError && checkError.code !== 'PGRST116') { // PGRST116 means no rows found
+                 throw checkError;
             }
-          ]);
-        
-        setIsSubmitting(false);
 
-        if (supabaseError) {
-          setError(`Gagal menyimpan data: ${supabaseError.message}`);
-          return;
+            if (existingData) {
+                setError(`OpsID ${formData.opsId} sudah melakukan pengajuan mutasi sebelumnya.`);
+                setIsSubmitting(false);
+                return;
+            }
+
+            // 2. Insert Data
+            const { error: insertError } = await supabase
+              .from('mutations')
+              .insert([
+                {
+                  ops_id: formData.opsId,
+                  full_name: formData.fullName,
+                  role: formData.role
+                }
+              ]);
+            
+            if (insertError) throw insertError;
+
+            setIsModalOpen(true);
+
+        } catch (err: any) {
+             setError(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`);
+        } finally {
+            setIsSubmitting(false);
         }
-
-        setIsModalOpen(true);
     };
 
-    const handleWhatsAppRedirect = () => {
-        const phoneNumber = '6287787460647';
+    const handleWhatsAppRedirect = (targetPhoneNumber: string) => {
         const message = `
 Halo Pak Korlap,
 Saya ingin mengajukan mutasi.
@@ -92,7 +111,7 @@ Mohon diproses lebih lanjut. Terima kasih.
         `.trim();
 
         const encodedMessage = encodeURIComponent(message);
-        window.open(`https://wa.me/${phoneNumber}?text=${encodedMessage}`, '_blank');
+        window.open(`https://wa.me/${targetPhoneNumber}?text=${encodedMessage}`, '_blank');
     };
 
     const handleCloseModal = () => {
@@ -146,7 +165,14 @@ Mohon diproses lebih lanjut. Terima kasih.
                 <option>{formData.stationId}</option>
             </Select>
         </FormRow>
-        {error && <div className="text-right md:col-start-2 md:col-span-2"><p className="text-red-500 text-sm">{error}</p></div>}
+        
+        {error && (
+            <div className="p-4 bg-red-100 border-l-4 border-red-500 text-red-700">
+                <p className="font-bold">Error</p>
+                <p>{error}</p>
+            </div>
+        )}
+
         <div className="flex flex-col md:flex-row items-center justify-between pt-8 gap-4">
             <button
                 type="button"
@@ -162,26 +188,38 @@ Mohon diproses lebih lanjut. Terima kasih.
                 disabled={isSubmitting}
                 className="w-full md:w-auto px-8 py-3 bg-orange-600 text-white font-bold rounded-lg shadow-md hover:bg-orange-700 transition-colors disabled:bg-gray-400"
             >
-                {isSubmitting ? 'Mengirim...' : 'Kirim Pengajuan Mutasi'}
+                {isSubmitting ? 'Sedang Memproses...' : 'Kirim Pengajuan Mutasi'}
             </button>
         </div>
       </form>
     </div>
     <Modal isOpen={isModalOpen} onClose={handleCloseModal} title="Pengajuan Mutasi Siap Dikonfirmasi">
-        <p className="text-gray-600 mb-6 text-center">
-            Data Anda telah berhasil disimpan di database. Silakan lanjutkan konfirmasi pengajuan mutasi melalui WhatsApp.
+        <p className="text-gray-600 mb-2 text-center">
+            Data Anda telah berhasil disimpan di database. Silakan pilih salah satu Korlap untuk konfirmasi melalui WhatsApp.
         </p>
-        <div className="flex flex-col gap-4">
+        <div className="bg-orange-50 border border-orange-200 rounded p-3 mb-6 text-center">
+             <p className="text-sm text-orange-800 font-medium italic">
+                Note: wa aja ya jangan telepon pasti di bales
+            </p>
+        </div>
+        <div className="flex flex-col gap-3">
             <button
-                onClick={handleWhatsAppRedirect}
+                onClick={() => handleWhatsAppRedirect('6287787460647')}
                 className="w-full px-6 py-3 bg-green-500 text-white font-bold rounded-lg shadow-md hover:bg-green-600 transition-colors flex items-center justify-center space-x-3"
             >
                 <WhatsappIcon className="w-6 h-6" />
-                <span>Konfirmasi via WhatsApp</span>
+                <span>Hubungi Pak Korlap 1</span>
+            </button>
+            <button
+                onClick={() => handleWhatsAppRedirect('6285890285218')}
+                className="w-full px-6 py-3 bg-green-500 text-white font-bold rounded-lg shadow-md hover:bg-green-600 transition-colors flex items-center justify-center space-x-3"
+            >
+                <WhatsappIcon className="w-6 h-6" />
+                <span>Hubungi Pak Korlap 2</span>
             </button>
             <button
                 onClick={handleCloseModal}
-                className="w-full px-6 py-2 text-slate-700 font-semibold hover:bg-slate-100 transition-colors rounded-lg"
+                className="w-full px-6 py-2 mt-2 text-slate-700 font-semibold hover:bg-slate-100 transition-colors rounded-lg"
             >
                 Tutup dan Kembali
             </button>
