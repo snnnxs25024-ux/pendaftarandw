@@ -40,7 +40,7 @@ const initialFormData = {
     contractType: 'Daily Worker Vendor - NEXUS',
     agency: 'NEXUS',
     department: 'SOC Operator',
-    stationId: '14461 (Sunter DC)',
+    stationId: 'Sunter DC',
 };
 
 const NewRegistrationForm: React.FC<NewRegistrationFormProps> = ({ onBack }) => {

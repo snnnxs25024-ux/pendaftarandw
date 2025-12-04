@@ -66,9 +66,16 @@ const App: React.FC = () => {
     <div className="min-h-screen bg-gray-100">
       <header className="bg-white shadow-md sticky top-0 z-10">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-orange-600 cursor-pointer" onClick={handleBackToLanding}>
-            PENDAFTARAN <span className="text-slate-800">DW NEXUS</span>
-          </h1>
+          <div className="flex items-center space-x-3 cursor-pointer" onClick={handleBackToLanding}>
+            <img 
+                src="https://i.imgur.com/fF8ZWc7.png" 
+                alt="Logo Nexus" 
+                className="h-10 w-auto mix-blend-multiply" 
+            />
+            <h1 className="text-2xl font-bold text-orange-600">
+                PENDAFTARAN <span className="text-slate-800">DW NEXUS</span>
+            </h1>
+          </div>
           {showAdminButton && (
              <button
                 onClick={handleGoToLogin}

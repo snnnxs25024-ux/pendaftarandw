@@ -12,6 +12,8 @@ import Modal from './Modal';
 import { supabase } from '../lib/supabaseClient';
 import { CheckCircleIcon } from './icons/CheckCircleIcon';
 import { WhatsappIcon } from './icons/WhatsappIcon';
+import { ChevronLeftIcon } from './icons/ChevronLeftIcon';
+import { ChevronRightIcon } from './icons/ChevronRightIcon';
 
 // --- TYPE DEFINITIONS (camelCase for UI) ---
 interface Registrant {
@@ -27,7 +29,8 @@ interface Registrant {
     agency: string;
     department: string;
     stationId: string;
-    status: string; // Added status
+    status: string;
+    generatedOpsId?: string; // New field for OpsID
     createdAt: string;
 }
 
@@ -36,7 +39,7 @@ interface Mutation {
     opsId: string;
     fullName: string;
     role: string;
-    status: string; // Added status
+    status: string;
     createdAt: string;
 }
 
@@ -51,24 +54,97 @@ const DataTable: React.FC<{
     openModal: (type: 'view' | 'edit' | 'delete', data: any, dataType: 'registrant' | 'mutation') => void;
     onStatusUpdate: (id: number, newStatus: string, type: 'registrant' | 'mutation') => void;
 }> = ({ title, data, type, searchTerm, setSearchTerm, handleCopy, openModal, onStatusUpdate }) => {
-    // Add Status header
+    
+    // Pagination State
+    const [currentPage, setCurrentPage] = useState(1);
+    const itemsPerPage = 10;
+
+    // WA Editor State
+    const [waModalOpen, setWaModalOpen] = useState(false);
+    const [waMessage, setWaMessage] = useState('');
+    const [waTargetPhone, setWaTargetPhone] = useState('');
+
+    // Reset to page 1 when search term or data changes
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm, data.length, type]);
+
+    // Calculate Pagination logic
+    const indexOfLastItem = currentPage * itemsPerPage;
+    const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+    const currentItems = data.slice(indexOfFirstItem, indexOfLastItem);
+    const totalPages = Math.ceil(data.length / itemsPerPage);
+
+    const goToNextPage = () => {
+        if (currentPage < totalPages) setCurrentPage(prev => prev + 1);
+    };
+
+    const goToPrevPage = () => {
+        if (currentPage > 1) setCurrentPage(prev => prev - 1);
+    };
+
+    // Add Headers (Added 'Generated OpsID' for registrants)
     const headers = type === 'registrant' 
-        ? ['Status', 'Nama Lengkap', 'NIK', 'No. WhatsApp'] 
+        ? ['Status', 'Nama Lengkap', 'NIK', 'Generated OpsID', 'No. WhatsApp'] 
         : ['Status', 'OpsID', 'Nama Lengkap', 'Role Diajukan'];
     
-    // State to give feedback on copy action
     const [copiedId, setCopiedId] = useState<number | null>(null);
 
     const onCopy = (item: any) => {
         handleCopy(item, type);
         setCopiedId(item.id);
-        setTimeout(() => setCopiedId(null), 2000); // Reset icon after 2 seconds
+        setTimeout(() => setCopiedId(null), 2000);
     };
 
-    const handleDirectWA = (phone: string) => {
-        // Remove non-numeric chars just in case, though form handles it
-        const cleanPhone = phone.replace(/\D/g, '');
-        window.open(`https://wa.me/${cleanPhone}`, '_blank');
+    const handleDirectWA = (item: any) => {
+        const phone = item.phone || '';
+        // 1. Remove non-numeric chars
+        let cleanPhone = phone.replace(/\D/g, '');
+        
+        // 2. Replace leading '0' with '62'
+        if (cleanPhone.startsWith('0')) {
+            cleanPhone = '62' + cleanPhone.slice(1);
+        }
+        
+        setWaTargetPhone(cleanPhone);
+
+        // 3. Prepare Data
+        const rawStatus = item.status || '';
+        const statusLower = rawStatus.toLowerCase().trim();
+        const opsId = item.generatedOpsId ? String(item.generatedOpsId).trim() : '';
+        const name = item.fullName;
+
+        let message = '';
+
+        // 4. Smart Template Logic
+        if (type === 'registrant') {
+            if (statusLower === 'diproses') {
+                // Template PROSES
+                message = `Halo, ${name} datamu lagi kami proses untuk pembuatan OpsID.\nTunggu sebentar ya, nanti kalau sudah jadi akan langsung kami infokan.`;
+            } else if (statusLower === 'selesai' || opsId.length > 0) {
+                // Template SELESAI
+                message = `Halo, ${name} OpsID kamu sudah selesai diproses.\nSilakan datang ke Tenda Vendor NEXUS di gudang dan bertemu Pak Dimas pada pukul 12.00–15.00 untuk pengambilan OpsID serta informasi shift kerja.\n\nMohon membawa seragam sesuai ketentuan:\n\nBaju tidak berkerah\n\nCelana pendek tanpa kantung\n\nSepatu bertali tanpa kaos kaki\n\nLokasi Maps:\nhttps://maps.app.goo.gl/CQVH6wUpqUPTGmz48\n\n(Pergudangan DUNEX – Gudang I, Tenda Vendor NEXUS)`;
+            } else {
+                // Template Default/Kosong
+                message = `Halo Sdr/i ${name}, `;
+            }
+        } else {
+            // Template Default Mutasi
+            message = `Halo Sdr/i ${name}, terkait pengajuan mutasi OpsID ${item.opsId}...`;
+        }
+
+        setWaMessage(message);
+        setWaModalOpen(true);
+    };
+
+    const sendWhatsAppMessage = () => {
+        if (!waTargetPhone) {
+            alert("Nomor telepon tidak valid.");
+            return;
+        }
+        const encodedMessage = encodeURIComponent(waMessage);
+        window.open(`https://wa.me/${waTargetPhone}?text=${encodedMessage}`, '_blank');
+        setWaModalOpen(false);
     };
 
     const getStatusColor = (status: string) => {
@@ -77,7 +153,7 @@ const DataTable: React.FC<{
             case 'diproses': return 'bg-blue-100 text-blue-800 border-blue-200';
             case 'selesai': return 'bg-green-100 text-green-800 border-green-200';
             case 'ditolak': return 'bg-red-100 text-red-800 border-red-200';
-            default: return 'bg-yellow-100 text-yellow-800 border-yellow-200'; // Menunggu
+            default: return 'bg-yellow-100 text-yellow-800 border-yellow-200'; 
         }
     };
 
@@ -85,83 +161,150 @@ const DataTable: React.FC<{
         <div>
             <div className="flex flex-col md:flex-row justify-between items-center mb-4 gap-4">
                 <h2 className="text-2xl font-bold text-slate-800">{title}</h2>
-                <input
-                    type="search"
-                    placeholder="Cari..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full md:w-auto px-4 py-2 bg-slate-800 border border-slate-600 placeholder-slate-400 text-white rounded-lg shadow-sm focus:ring-orange-500 focus:border-orange-500"
-                />
+                <div className="flex items-center gap-2 w-full md:w-auto">
+                    <input
+                        type="search"
+                        placeholder="Cari..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full px-4 py-2 bg-slate-800 border border-slate-600 placeholder-slate-400 text-white rounded-lg shadow-sm focus:ring-orange-500 focus:border-orange-500"
+                    />
+                </div>
             </div>
-            <div className="overflow-x-auto bg-white rounded-lg shadow pb-24 md:pb-0"> 
-                {/* Added pb-24 to allow dropdown space on mobile if needed */}
-                <table className="min-w-full leading-normal">
-                    <thead>
-                        <tr>
-                            {headers.map(h => <th key={h} className="px-5 py-3 border-b-2 border-orange-200 bg-orange-100 text-left text-xs font-semibold text-orange-800 uppercase tracking-wider">{h}</th>)}
-                            <th className="px-5 py-3 border-b-2 border-orange-200 bg-orange-100 text-right text-xs font-semibold text-orange-800 uppercase tracking-wider">Aksi</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {data.length > 0 ? (
-                            data.map(item => (
-                                <tr key={item.id}>
-                                    <td className="px-5 py-4 border-b border-gray-200 text-sm">
-                                        <div className="relative">
-                                            <select
-                                                value={item.status || 'Menunggu'}
-                                                onChange={(e) => onStatusUpdate(item.id, e.target.value, type)}
-                                                className={`appearance-none block w-full px-3 py-1 pr-8 text-xs font-bold rounded-full border cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-orange-500 ${getStatusColor(item.status)}`}
-                                            >
-                                                <option value="Menunggu">Menunggu</option>
-                                                <option value="Diproses">Diproses</option>
-                                                <option value="Selesai">Selesai</option>
-                                                <option value="Ditolak">Ditolak</option>
-                                            </select>
-                                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
-                                                <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+            
+            <div className="overflow-hidden bg-white rounded-lg shadow flex flex-col"> 
+                <div className="overflow-x-auto">
+                    <table className="min-w-full leading-normal">
+                        <thead>
+                            <tr>
+                                {headers.map(h => <th key={h} className="px-5 py-3 border-b-2 border-orange-200 bg-orange-100 text-left text-xs font-semibold text-orange-800 uppercase tracking-wider">{h}</th>)}
+                                <th className="px-5 py-3 border-b-2 border-orange-200 bg-orange-100 text-right text-xs font-semibold text-orange-800 uppercase tracking-wider">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {currentItems.length > 0 ? (
+                                currentItems.map(item => (
+                                    <tr key={item.id}>
+                                        <td className="px-5 py-4 border-b border-gray-200 text-sm">
+                                            <div className="relative">
+                                                <select
+                                                    value={item.status || 'Menunggu'}
+                                                    onChange={(e) => onStatusUpdate(item.id, e.target.value, type)}
+                                                    className={`appearance-none block w-full px-3 py-1 pr-8 text-xs font-bold rounded-full border cursor-pointer focus:outline-none focus:ring-2 focus:ring-offset-1 focus:ring-orange-500 ${getStatusColor(item.status)}`}
+                                                >
+                                                    <option value="Menunggu">Menunggu</option>
+                                                    <option value="Diproses">Diproses</option>
+                                                    <option value="Selesai">Selesai</option>
+                                                    <option value="Ditolak">Ditolak</option>
+                                                </select>
+                                                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-700">
+                                                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                                                </div>
                                             </div>
-                                        </div>
-                                    </td>
-                                    {type === 'registrant' ? (<>
-                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.fullName}</td>
-                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.nik}</td>
-                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.phone}</td>
-                                    </>) : (<>
-                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.opsId}</td>
-                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.fullName}</td>
-                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.role}</td>
-                                    </>)}
-                                    <td className="px-5 py-4 border-b border-gray-200 text-sm text-right flex justify-end items-center space-x-2">
-                                        {/* Direct WA Button only for Registrants who have phone numbers */}
-                                        {type === 'registrant' && (
-                                            <button 
-                                                onClick={() => handleDirectWA(item.phone)} 
-                                                title="Hubungi via WhatsApp" 
-                                                className="p-1 text-green-600 hover:text-green-800 hover:bg-green-50 rounded-full transition-colors"
-                                            >
-                                                <WhatsappIcon className="w-5 h-5"/>
+                                        </td>
+                                        {type === 'registrant' ? (<>
+                                            <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.fullName}</td>
+                                            <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.nik}</td>
+                                            <td className="px-5 py-4 border-b border-gray-200 text-sm font-mono text-blue-600 font-semibold">
+                                                {item.generatedOpsId || '-'}
+                                            </td>
+                                            <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.phone}</td>
+                                        </>) : (<>
+                                            <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.opsId}</td>
+                                            <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.fullName}</td>
+                                            <td className="px-5 py-4 border-b border-gray-200 text-sm text-gray-900">{item.role}</td>
+                                        </>)}
+                                        <td className="px-5 py-4 border-b border-gray-200 text-sm text-right flex justify-end items-center space-x-2">
+                                            {type === 'registrant' && (
+                                                <button 
+                                                    onClick={() => handleDirectWA(item)} 
+                                                    title="Kirim Pesan WA (Preview & Edit)"
+                                                    className={`p-1 rounded-full transition-colors ${item.generatedOpsId ? 'text-white bg-green-500 hover:bg-green-600 shadow-md p-1.5' : 'text-green-600 hover:text-green-800 hover:bg-green-50'}`}
+                                                >
+                                                    <WhatsappIcon className="w-5 h-5"/>
+                                                </button>
+                                            )}
+                                            <button onClick={() => onCopy(item)} title="Salin Data" className="text-gray-500 hover:text-blue-600 disabled:opacity-50" disabled={copiedId === item.id}>
+                                                {copiedId === item.id ? <CheckCircleIcon className="w-5 h-5 text-green-500" /> : <ClipboardIcon className="w-5 h-5"/>}
                                             </button>
-                                        )}
-                                        <button onClick={() => onCopy(item)} title="Salin Data" className="text-gray-500 hover:text-blue-600 disabled:opacity-50" disabled={copiedId === item.id}>
-                                            {copiedId === item.id ? <CheckCircleIcon className="w-5 h-5 text-green-500" /> : <ClipboardIcon className="w-5 h-5"/>}
-                                        </button>
-                                        <button onClick={() => openModal('view', item, type)} title="Lihat Detail" className="text-gray-500 hover:text-green-600"><EyeIcon className="w-5 h-5"/></button>
-                                        <button onClick={() => openModal('edit', item, type)} title="Edit Data" className="text-gray-500 hover:text-yellow-600"><PencilIcon className="w-5 h-5"/></button>
-                                        <button onClick={() => openModal('delete', item, type)} title="Hapus" className="text-gray-500 hover:text-red-600"><TrashIcon className="w-5 h-5"/></button>
+                                            <button onClick={() => openModal('view', item, type)} title="Lihat Detail" className="text-gray-500 hover:text-green-600"><EyeIcon className="w-5 h-5"/></button>
+                                            <button onClick={() => openModal('edit', item, type)} title="Edit Data" className="text-gray-500 hover:text-yellow-600"><PencilIcon className="w-5 h-5"/></button>
+                                            <button onClick={() => openModal('delete', item, type)} title="Hapus" className="text-gray-500 hover:text-red-600"><TrashIcon className="w-5 h-5"/></button>
+                                        </td>
+                                    </tr>
+                                ))
+                            ) : (
+                                <tr>
+                                    <td colSpan={headers.length + 1} className="text-center py-10 text-gray-500">
+                                        {searchTerm ? 'Tidak ada hasil yang cocok dengan pencarian Anda.' : 'Tidak ada data untuk ditampilkan.'}
                                     </td>
                                 </tr>
-                            ))
-                        ) : (
-                            <tr>
-                                <td colSpan={headers.length + 1} className="text-center py-10 text-gray-500">
-                                    {searchTerm ? 'Tidak ada hasil yang cocok dengan pencarian Anda.' : 'Tidak ada data untuk ditampilkan.'}
-                                </td>
-                            </tr>
-                        )}
-                    </tbody>
-                </table>
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Pagination Footer */}
+                {data.length > 0 && (
+                    <div className="px-5 py-4 bg-white border-t flex flex-col xs:flex-row items-center justify-between gap-4">
+                        <span className="text-sm text-gray-700">
+                            Menampilkan <span className="font-semibold text-gray-900">{indexOfFirstItem + 1}</span> sampai <span className="font-semibold text-gray-900">{Math.min(indexOfLastItem, data.length)}</span> dari <span className="font-semibold text-gray-900">{data.length}</span> data
+                        </span>
+                        <div className="inline-flex mt-2 xs:mt-0 gap-2">
+                            <button
+                                onClick={goToPrevPage}
+                                disabled={currentPage === 1}
+                                className="flex items-center justify-center w-10 h-10 rounded-full border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                                <ChevronLeftIcon className="w-5 h-5" />
+                            </button>
+                            <div className="flex items-center justify-center px-4 h-10 rounded-full bg-orange-50 border border-orange-200 text-sm font-medium text-orange-700">
+                                Hal {currentPage} / {totalPages}
+                            </div>
+                            <button
+                                onClick={goToNextPage}
+                                disabled={currentPage === totalPages}
+                                className="flex items-center justify-center w-10 h-10 rounded-full border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                                <ChevronRightIcon className="w-5 h-5" />
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
+
+            {/* WA Editor Modal */}
+            <Modal isOpen={waModalOpen} onClose={() => setWaModalOpen(false)} title="Kirim Pesan WhatsApp">
+                <div className="space-y-4">
+                    <p className="text-gray-600 text-sm">
+                        Silakan tinjau dan edit pesan di bawah ini sebelum dikirim ke kandidat.
+                    </p>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">Isi Pesan:</label>
+                        <textarea
+                            rows={10}
+                            value={waMessage}
+                            onChange={(e) => setWaMessage(e.target.value)}
+                            className="w-full px-3 py-2 bg-slate-50 border border-gray-300 rounded-md shadow-sm focus:ring-green-500 focus:border-green-500 text-sm font-sans"
+                        />
+                    </div>
+                    <div className="flex justify-end gap-3 pt-2">
+                        <button 
+                            onClick={() => setWaModalOpen(false)} 
+                            className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors"
+                        >
+                            Batal
+                        </button>
+                        <button 
+                            onClick={sendWhatsAppMessage} 
+                            className="px-6 py-2 bg-green-500 text-white font-bold rounded shadow hover:bg-green-600 transition-colors flex items-center gap-2"
+                        >
+                            <WhatsappIcon className="w-5 h-5" />
+                            Kirim ke WA
+                        </button>
+                    </div>
+                </div>
+            </Modal>
         </div>
     )
 };
@@ -180,9 +323,14 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
     const [modalState, setModalState] = useState<{ type: 'view' | 'edit' | 'delete' | null; data: any; dataType: 'registrant' | 'mutation' | null }>({ type: null, data: null, dataType: null });
     const [editFormData, setEditFormData] = useState<any>(null);
 
+    // --- State for OpsID Input Modal ---
+    const [opsIdModalOpen, setOpsIdModalOpen] = useState(false);
+    const [pendingStatusId, setPendingStatusId] = useState<number | null>(null);
+    const [opsIdInput, setOpsIdInput] = useState('');
+
     const showNotification = (message: string, type: 'success' | 'error') => {
         setNotification({ message, type });
-        setTimeout(() => setNotification(null), 5000); // Increased timeout for reading errors
+        setTimeout(() => setNotification(null), 5000);
     };
 
     const fetchRegistrants = useCallback(async () => {
@@ -204,7 +352,8 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                 agency: item.agency,
                 department: item.department,
                 stationId: item.station_id,
-                status: item.status, // Fetch status
+                status: item.status, 
+                generatedOpsId: item.generated_ops_id, // Fetch generated_ops_id
                 createdAt: new Date(item.created_at).toLocaleDateString('id-ID'),
             }));
             setRegistrants(formattedData);
@@ -222,7 +371,7 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                 opsId: item.ops_id,
                 fullName: item.full_name,
                 role: item.role,
-                status: item.status, // Fetch status
+                status: item.status, 
                 createdAt: new Date(item.created_at).toLocaleDateString('id-ID'),
             }));
             setMutations(formattedData);
@@ -255,15 +404,15 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         if (type === 'registrant') {
             const reg = data as Registrant;
             textToCopy = [
-                reg.status || 'Menunggu', // Include Status
-                reg.fullName, reg.nik, reg.religion, reg.contractType, reg.phone,
+                reg.fullName, 
+                reg.nik,
+                reg.religion, ,reg.contractType,reg.phone,
                 reg.bankName, reg.bankAccountName, reg.bankAccountNumber,
                 reg.agency, reg.department, reg.stationId
             ].join('\t');
         } else {
             const mut = data as Mutation;
             textToCopy = [
-                mut.status || 'Menunggu', // Include Status
                 mut.opsId, mut.role, mut.role, mut.fullName
             ].join('\t');
         }
@@ -275,11 +424,18 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             });
     };
 
-    // --- New: Handle Quick Status Update ---
     const handleStatusUpdate = async (id: number, newStatus: string, type: 'registrant' | 'mutation') => {
+        // SPECIAL CASE: If Registrant and Status is 'Selesai', prompt for OpsID
+        if (type === 'registrant' && newStatus === 'Selesai') {
+            setPendingStatusId(id);
+            setOpsIdInput(''); // Reset input
+            setOpsIdModalOpen(true);
+            return; // Stop here, wait for modal
+        }
+
         const table = type === 'registrant' ? 'registrants' : 'mutations';
         
-        // Optimistic UI update (update screen before waiting for DB)
+        // Optimistic UI update
         if (type === 'registrant') {
             setRegistrants(prev => prev.map(r => r.id === id ? { ...r, status: newStatus } : r));
         } else {
@@ -291,7 +447,6 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         if (error) {
             console.error('Error updating status:', JSON.stringify(error, null, 2));
             showNotification(`Gagal memperbarui status: ${error.message || 'Lihat console'}`, 'error');
-            // Revert changes if needed (typically fetchRegistrants will fix it on refresh)
             if (type === 'registrant') fetchRegistrants(); 
             else fetchMutations();
         } else {
@@ -299,9 +454,42 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         }
     };
 
+    // --- Submit OpsID Modal ---
+    const submitOpsId = async () => {
+        if (!pendingStatusId || !opsIdInput) {
+            showNotification('OpsID tidak boleh kosong!', 'error');
+            return;
+        }
+
+        // Update DB: Status = Selesai AND generated_ops_id = opsIdInput
+        const { error } = await supabase.from('registrants')
+            .update({ 
+                status: 'Selesai',
+                generated_ops_id: opsIdInput 
+            })
+            .eq('id', pendingStatusId);
+
+        if (error) {
+             console.error('Error updating OpsID:', JSON.stringify(error, null, 2));
+             showNotification(`Gagal menyimpan OpsID: ${error.message}`, 'error');
+        } else {
+            showNotification(`Status Selesai! OpsID disimpan: ${opsIdInput}`, 'success');
+            await fetchRegistrants(); // Refresh data to show OpsID in table
+            setOpsIdModalOpen(false);
+            setPendingStatusId(null);
+            setOpsIdInput('');
+        }
+    };
+
+    const cancelOpsId = () => {
+        setOpsIdModalOpen(false);
+        setPendingStatusId(null);
+        setOpsIdInput('');
+        // Revert Optimistic update? (Actually we haven't updated state yet for this case, so no need)
+    };
+
     const openModal = (type: 'view' | 'edit' | 'delete', data: any, dataType: 'registrant' | 'mutation') => {
         setModalState({ type, data, dataType });
-        // Ensure status has a default value for edit form
         if(type === 'edit') setEditFormData({ ...data, status: data.status || 'Menunggu' });
     };
     
@@ -321,18 +509,19 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         let error = null;
 
         if (modalState.dataType === 'registrant') {
-            const { fullName, nik, religion, contractType, phone, bankName, bankAccountName, bankAccountNumber, agency, department, stationId, status } = rest;
+            const { fullName, nik, religion, contractType, phone, bankName, bankAccountName, bankAccountNumber, agency, department, stationId, status, generatedOpsId } = rest;
             const result = await supabase.from('registrants').update({
                 full_name: fullName, nik, religion, contract_type: contractType, phone,
                 bank_name: bankName, bank_account_name: bankAccountName, bank_account_number: bankAccountNumber,
-                agency, department, station_id: stationId, status // Save status
+                agency, department, station_id: stationId, status,
+                generated_ops_id: generatedOpsId // Allow editing this too
             }).eq('id', id);
             error = result.error;
 
         } else if (modalState.dataType === 'mutation') {
             const { opsId, fullName, role, status } = rest;
             const result = await supabase.from('mutations').update({
-                ops_id: opsId, full_name: fullName, role, status // Save status
+                ops_id: opsId, full_name: fullName, role, status
             }).eq('id', id);
             error = result.error;
         }
@@ -340,7 +529,6 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         if (error) {
              console.error('Error saving changes:', JSON.stringify(error, null, 2));
              showNotification('Gagal menyimpan perubahan: ' + error.message, 'error');
-             // Do NOT close modal on error, so user can retry or copy data
         } else {
             if (modalState.dataType === 'registrant') await fetchRegistrants();
             else await fetchMutations();
@@ -389,8 +577,8 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
     );
 
     const StatCard: React.FC<{ title: string; value: string | number; }> = ({ title, value }) => (
-        <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-gray-500 text-sm font-medium">{title}</h3>
+        <div className="bg-white p-6 rounded-lg shadow h-full flex flex-col justify-center">
+            <h3 className="text-gray-500 text-sm font-medium mb-2">{title}</h3>
             <p className="text-3xl font-bold text-slate-800">{value}</p>
         </div>
     );
@@ -402,12 +590,69 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
 
         switch (activeView) {
             case 'dashboard':
+                // Calculation for analytics
+                const todayStr = new Date().toLocaleDateString('id-ID');
+                const dailyRegistrants = registrants.filter(r => r.createdAt === todayStr).length;
+
+                // Simple Chart Data: Last 7 days
+                const last7Days = Array.from({ length: 7 }, (_, i) => {
+                    const d = new Date();
+                    d.setDate(d.getDate() - (6 - i)); // 6 days ago to today
+                    return d.toLocaleDateString('id-ID');
+                });
+
+                const chartData = last7Days.map(dateStr => {
+                    const count = registrants.filter(r => r.createdAt === dateStr).length;
+                    const dayLabel = dateStr.split('/')[0]; // Show only the day number
+                    return { date: dateStr, label: dayLabel, count };
+                });
+
+                const maxChartValue = Math.max(...chartData.map(d => d.count), 5); // Minimum scale 5
+
                 return (
-                    <div>
-                        <h2 className="text-2xl font-bold text-slate-800 mb-4">Ringkasan</h2>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="animate-fade-in pb-10">
+                        <h2 className="text-2xl font-bold text-slate-800 mb-6">Dashboard Analytics</h2>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
                             <StatCard title="Total Pendaftar Baru" value={registrants.length} />
+                            <StatCard title="Pendaftar Hari Ini" value={dailyRegistrants} />
                             <StatCard title="Total Pengajuan Mutasi" value={mutations.length} />
+                        </div>
+
+                        {/* Chart Section */}
+                        <div className="bg-white p-6 rounded-lg shadow-md">
+                            <div className="flex items-center justify-between mb-6">
+                                <h3 className="text-lg font-bold text-slate-700 flex items-center gap-2">
+                                    <ChartBarIcon className="w-5 h-5 text-orange-500" />
+                                    Tren Pendaftaran (7 Hari Terakhir)
+                                </h3>
+                            </div>
+
+                            <div className="h-64 flex items-end justify-between space-x-2 md:space-x-4">
+                                {chartData.map((item, index) => (
+                                    <div key={index} className="flex-1 flex flex-col items-center group relative">
+                                        {/* Tooltip */}
+                                        <div className="absolute bottom-full mb-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-xs rounded py-1 px-2 whitespace-nowrap z-10 pointer-events-none shadow-lg">
+                                            {item.count} Pendaftar ({item.date})
+                                        </div>
+
+                                        {/* Bar Container */}
+                                        <div className="w-full bg-orange-50 rounded-t-md relative overflow-hidden flex flex-col justify-end h-full hover:bg-orange-100 transition-colors">
+                                             {/* Animated Bar */}
+                                             <div 
+                                                style={{ height: `${(item.count / maxChartValue) * 100}%` }}
+                                                className={`w-full bg-orange-500 rounded-t-md relative transition-all duration-1000 ease-out`}
+                                             >
+                                             </div>
+                                        </div>
+
+                                        {/* X-Axis Label */}
+                                        <div className="mt-3 text-xs md:text-sm text-gray-500 font-medium">
+                                            {item.label}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
                     </div>
                 );
@@ -437,8 +682,7 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         const EditForm = () => {
             if (!editFormData) return null;
             return (
-                <form className="space-y-3">
-                    {/* Status Field specifically */}
+                <form className="space-y-3 h-[60vh] overflow-y-auto pr-2">
                     <div>
                         <label className="block text-sm font-medium text-gray-700">Status Proses</label>
                         <select
@@ -454,13 +698,31 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                         </select>
                     </div>
 
-                    {Object.entries(editFormData).filter(([key]) => !['id', 'createdAt', 'status'].includes(key)).map(([key, value]) => (
+                    {/* Explicity Show Generated OpsID for Registrants */}
+                    {modalState.dataType === 'registrant' && (
+                        <div className="bg-orange-50 p-3 rounded-md border border-orange-200 my-2">
+                            <label className="block text-sm font-bold text-orange-800">Generated OpsID</label>
+                            <input
+                                type="text"
+                                name="generatedOpsId"
+                                value={editFormData.generatedOpsId || ''}
+                                onChange={handleEditFormChange}
+                                placeholder="Kosongkan jika ingin menghapus"
+                                className="mt-1 block w-full px-3 py-2 bg-white border border-orange-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 text-orange-900 font-mono"
+                            />
+                            <p className="text-xs text-orange-700 mt-1 italic">*Edit nomor ini jika salah input, atau hapus isinya untuk membatalkan.</p>
+                        </div>
+                    )}
+
+                    {Object.entries(editFormData)
+                        .filter(([key]) => !['id', 'createdAt', 'status', 'generatedOpsId'].includes(key)) // Filter out manually handled fields
+                        .map(([key, value]) => (
                         <div key={key}>
                             <label className="block text-sm font-medium text-gray-700 capitalize">{key.replace(/([A-Z])/g, ' $1')}</label>
                             <input
                                 type="text"
                                 name={key}
-                                value={editFormData[key]}
+                                value={editFormData[key] || ''}
                                 onChange={handleEditFormChange}
                                 className="mt-1 block w-full px-3 py-2 bg-slate-50 border border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500"
                             />
@@ -542,8 +804,32 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                 {renderContent()}
             </main>
             
-            {/* Modals */}
+            {/* CRUD Modals */}
             {renderModalContent()}
+
+            {/* OpsID Input Modal */}
+            <Modal isOpen={opsIdModalOpen} onClose={cancelOpsId} title="Input OpsID Kandidat">
+                <div className="space-y-4">
+                    <p className="text-gray-600">
+                        Anda menandai status pendaftar ini sebagai <strong>Selesai</strong>. 
+                        Silakan masukkan <strong>OpsID</strong> yang diberikan kepada kandidat ini untuk disimpan ke dalam sistem.
+                    </p>
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700">Generated OpsID</label>
+                        <input 
+                            type="text" 
+                            className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:ring-orange-500 focus:border-orange-500 font-bold tracking-wide"
+                            placeholder="Contoh: 2400123"
+                            value={opsIdInput}
+                            onChange={(e) => setOpsIdInput(e.target.value)}
+                        />
+                    </div>
+                    <div className="flex justify-end gap-3 pt-4">
+                        <button onClick={cancelOpsId} className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Batal</button>
+                        <button onClick={submitOpsId} className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700 font-bold">Simpan & Selesaikan</button>
+                    </div>
+                </div>
+            </Modal>
             
             {/* Notification Toast */}
             {notification && (

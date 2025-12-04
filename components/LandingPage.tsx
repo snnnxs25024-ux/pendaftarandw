@@ -31,7 +31,12 @@ const LandingPage: React.FC<LandingPageProps> = ({ onContinue }) => {
 
   return (
     <div className="space-y-8 animate-fade-in">
-      <section className="text-center p-6 bg-white rounded-lg shadow">
+      <section className="text-center p-6 bg-white rounded-lg shadow flex flex-col items-center">
+        <img 
+            src="https://i.imgur.com/fF8ZWc7.png" 
+            alt="Logo Nexus" 
+            className="h-24 w-auto mb-4 mix-blend-multiply" 
+        />
         <h2 className="text-3xl font-extrabold text-slate-900 mb-2">DAILY WORKER SHOPEE XPRESS</h2>
         <p className="text-gray-600 max-w-3xl mx-auto">
           Selamat datang calon Daily Worker! Berikut adalah informasi penting terkait pekerjaan, benefit, dan persyaratan yang perlu Anda ketahui sebelum melanjutkan proses pendaftaran.

@@ -24,8 +24,13 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToHome }) =
   return (
     <div className="flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 animate-fade-in">
       <div className="max-w-md w-full space-y-8 bg-white p-10 rounded-xl shadow-lg">
-        <div>
-          <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
+        <div className="flex flex-col items-center">
+          <img 
+            src="https://i.imgur.com/fF8ZWc7.png" 
+            alt="Logo Nexus" 
+            className="h-20 w-auto mb-4 mix-blend-multiply" 
+          />
+          <h2 className="mt-2 text-center text-3xl font-extrabold text-gray-900">
             Login Admin
           </h2>
           <p className="mt-2 text-center text-sm text-gray-600">

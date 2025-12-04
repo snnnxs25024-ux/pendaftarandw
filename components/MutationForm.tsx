@@ -35,7 +35,7 @@ const initialFormData = {
     contractType: 'Daily Worker Vendor - NEXUS',
     agency: 'NEXUS',
     department: 'SOC Operator',
-    stationId: '14461 (Sunter DC)',
+    stationId: 'Sunter DC',
 };
 
 const MutationForm: React.FC<MutationFormProps> = ({ onBack }) => {
