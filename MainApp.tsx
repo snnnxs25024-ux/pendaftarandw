@@ -1,4 +1,4 @@
-// REBUILD-FORCE-V3: 2024.07.28
+// REBUILD-FORCE-V4: File Renamed to MainApp.tsx
 import React, { useState, useEffect } from 'react';
 import LandingPage from './components/LandingPage';
 import SelectionPage from './components/SelectionPage';
@@ -13,7 +13,7 @@ import GeolocationWrapper from './components/GeolocationWrapper';
 
 type Page = 'landing' | 'selection' | 'newRegistration' | 'mutation' | 'login' | 'dashboard';
 
-const App: React.FC = () => {
+const MainApp: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<Page>('landing');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(false);
 
@@ -130,4 +130,4 @@ const App: React.FC = () => {
   );
 };
 
-export default App;
+export default MainApp;

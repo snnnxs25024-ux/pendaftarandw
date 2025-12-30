@@ -29,10 +29,10 @@ const SelectionCard: React.FC<{ title: string; description: string; icon: React.
 const SelectionPage: React.FC<SelectionPageProps> = ({ onBack, onGoToNewRegistration, onGoToMutation }) => {
     
   return (
-    <div className="flex flex-col items-center justify-center animate-fade-in">
+    <div className="flex flex-col items-center justify-center animate-fade-in py-10">
         <div className="text-center mb-10">
-            <h2 className="text-3xl font-extrabold text-slate-900 mb-2">Pilih Jenis Formulir</h2>
-            <p className="text-gray-600 max-w-xl mx-auto">
+            <h2 className="text-4xl font-extrabold text-white mb-4 drop-shadow-lg">Pilih Jenis Formulir</h2>
+            <p className="text-slate-100 max-w-xl mx-auto text-lg drop-shadow-md">
                 Silakan pilih salah satu opsi di bawah ini untuk melanjutkan. Apakah Anda ingin mendaftar sebagai pekerja baru atau mengajukan mutasi?
             </p>
         </div>
@@ -52,7 +52,7 @@ const SelectionPage: React.FC<SelectionPageProps> = ({ onBack, onGoToNewRegistra
         </div>
         <button 
             onClick={onBack}
-            className="mt-12 px-6 py-2 text-orange-600 font-semibold border border-orange-600 rounded-lg hover:bg-orange-50 transition-colors"
+            className="mt-12 px-8 py-3 bg-white text-orange-600 font-bold rounded-lg hover:bg-slate-100 transition-all shadow-lg hover:scale-105"
         >
             Kembali ke Informasi
         </button>

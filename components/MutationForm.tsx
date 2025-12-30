@@ -3,6 +3,7 @@ import { ArrowLeftIcon } from './icons/ArrowLeftIcon';
 import Modal from './Modal';
 import { WhatsappIcon } from './icons/WhatsappIcon';
 import { supabase } from '../lib/supabaseClient';
+import { useNotification } from '../contexts/NotificationContext';
 
 interface MutationFormProps {
   onBack: () => void;
@@ -40,7 +41,7 @@ const initialFormData = {
 
 const MutationForm: React.FC<MutationFormProps> = ({ onBack }) => {
     const [formData, setFormData] = useState(initialFormData);
-    const [error, setError] = useState('');
+    const { showNotification } = useNotification();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -50,7 +51,6 @@ const MutationForm: React.FC<MutationFormProps> = ({ onBack }) => {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setError('');
         setIsSubmitting(true);
         
         try {
@@ -66,7 +66,7 @@ const MutationForm: React.FC<MutationFormProps> = ({ onBack }) => {
             }
 
             if (existingData) {
-                setError(`OpsID ${formData.opsId} sudah melakukan pengajuan mutasi sebelumnya.`);
+                showNotification(`OpsID ${formData.opsId} sudah mengajukan mutasi.`, 'error');
                 setIsSubmitting(false);
                 return;
             }
@@ -87,7 +87,7 @@ const MutationForm: React.FC<MutationFormProps> = ({ onBack }) => {
             setIsModalOpen(true);
 
         } catch (err: any) {
-             setError(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`);
+             showNotification(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`, 'error');
         } finally {
             setIsSubmitting(false);
         }
@@ -165,13 +165,6 @@ Mohon diproses lebih lanjut. Terima kasih.
                 <option>{formData.stationId}</option>
             </Select>
         </FormRow>
-        
-        {error && (
-            <div className="p-4 bg-red-100 border-l-4 border-red-500 text-red-700">
-                <p className="font-bold">Error</p>
-                <p>{error}</p>
-            </div>
-        )}
 
         <div className="flex flex-col md:flex-row items-center justify-between pt-8 gap-4">
             <button

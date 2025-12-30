@@ -1,7 +1,9 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Card from './Card';
 import { CheckIcon } from './icons/CheckIcon';
+import { useGeolocation } from '../lib/useGeolocation';
+import { MapPinIcon } from './icons/MapPinIcon';
+import { ArrowPathIcon } from './icons/ArrowPathIcon';
 
 interface LandingPageProps {
   onContinue: () => void;
@@ -28,9 +30,54 @@ const jobDescriptions = [
 
 const LandingPage: React.FC<LandingPageProps> = ({ onContinue }) => {
   const [isConfirmed, setIsConfirmed] = useState(false);
+  const { isLoading, isEnabled, status, checkLocation } = useGeolocation();
+
+  useEffect(() => {
+    // Trigger location check on mount if the feature is enabled in settings.
+    // This check is non-blocking for the UI.
+    if (!isLoading && isEnabled) {
+      checkLocation();
+    }
+  }, [isLoading, isEnabled, checkLocation]);
+
+  const isOutOfRange = isEnabled && status !== 'checking' && status !== 'in_range' && status !== 'idle';
 
   return (
     <div className="space-y-8 animate-fade-in">
+
+      {/* Geolocation Notification Banner */}
+      {isEnabled && status !== 'idle' && (
+        <div className={`
+          p-4 rounded-lg shadow-md mb-6 flex items-start gap-4 transition-all duration-300 
+          ${isOutOfRange ? 'bg-red-50 border-l-4 border-red-500' : 'bg-green-50 border-l-4 border-green-500'}
+        `}>
+          <div className="shrink-0 pt-1">
+            {isOutOfRange ? (
+              <MapPinIcon className="w-6 h-6 text-red-600"/>
+            ) : status === 'in_range' ? (
+              <CheckIcon className="w-6 h-6 text-green-600"/>
+            ) : (
+              <ArrowPathIcon className="w-6 h-6 text-slate-500 animate-spin"/>
+            )}
+          </div>
+          <div>
+            <h4 className={`
+              font-bold text-lg
+              ${isOutOfRange ? 'text-red-800' : 'text-green-800'}
+            `}>
+              { isOutOfRange ? 'Anda Berada di Luar Jangkauan' : status === 'in_range' ? 'Lokasi Anda Sesuai' : 'Memeriksa Lokasi...' }
+            </h4>
+            <p className={`
+              text-sm mt-1
+              ${isOutOfRange ? 'text-red-700' : 'text-green-700'}
+            `}>
+               { isOutOfRange ? 'Pendaftaran hanya bisa dilakukan di area yang telah ditentukan. Anda tidak dapat melanjutkan proses pendaftaran.' : status === 'in_range' ? 'Anda dapat melanjutkan ke proses pendaftaran.' : 'Harap tunggu, sistem sedang memverifikasi lokasi Anda...' }
+            </p>
+          </div>
+        </div>
+      )}
+
+
       <section className="text-center p-6 bg-white rounded-lg shadow flex flex-col items-center">
         <img 
             src="https://i.imgur.com/fF8ZWc7.png" 
@@ -44,7 +91,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onContinue }) => {
       </section>
 
       <section>
-        <h3 className="text-2xl font-bold mb-4 text-slate-800">Deskripsi Pekerjaan (Jobdesk)</h3>
+        <h3 className="text-2xl font-bold mb-4 text-white drop-shadow-md">Deskripsi Pekerjaan (Jobdesk)</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {jobDescriptions.map((job) => (
             <Card key={job.title} title={job.title}>
@@ -102,7 +149,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onContinue }) => {
           </label>
           <button
             onClick={onContinue}
-            disabled={!isConfirmed}
+            disabled={!isConfirmed || isOutOfRange || status === 'checking'}
             className="w-full md:w-auto px-8 py-3 bg-orange-600 text-white font-bold rounded-lg shadow-md hover:bg-orange-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-all duration-300 ease-in-out transform hover:scale-105 disabled:scale-100 flex items-center justify-center space-x-2"
           >
             <CheckIcon className="w-6 h-6" />

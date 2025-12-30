@@ -1,5 +1,8 @@
 {
   "name": "Pendaftaran DW Nexus",
   "description": "A web application for Daily Worker registration and information at Shopee Xpress, managed by DW Nexus. It provides job details, requirements, and registration forms.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
 }
