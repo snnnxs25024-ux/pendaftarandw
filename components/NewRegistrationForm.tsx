@@ -4,11 +4,11 @@ import Modal from './Modal';
 import { WhatsappIcon } from './icons/WhatsappIcon';
 import { supabase } from '../lib/supabaseClient';
 import { CameraIcon } from './icons/CameraIcon';
-import { CloudArrowUpIcon } from './icons/CloudArrowUpIcon';
 import { ArrowUturnLeftIcon } from './icons/ArrowUturnLeftIcon';
 import { IdentificationIcon } from './icons/IdentificationIcon';
 import { useNotification } from '../contexts/NotificationContext';
 
+type CameraMode = 'selfie' | 'ktp' | null;
 
 interface NewRegistrationFormProps {
   onBack: () => void;
@@ -47,7 +47,7 @@ const initialFormData = {
     department: 'SOC Operator',
     stationId: 'Sunter DC',
     infoSource: '',
-    ktpPhoto: null as File | null,
+    ktpPhoto: null as string | null, // as data URL
     selfiePhoto: null as string | null, // as data URL
 };
 
@@ -66,15 +66,93 @@ const dataURLtoFile = (dataurl: string, filename: string): File => {
     return new File([u8arr], filename, { type: mime });
 }
 
+// SVG overlay component for the Selfie camera
+const FaceFrame: React.FC<{ status: 'good' | 'bad' | 'neutral' }> = ({ status }) => {
+    const strokeColor = status === 'good' ? '#22c55e' : status === 'bad' ? '#ef4444' : 'white';
+    return (
+        <svg
+            className="absolute inset-0 w-full h-full"
+            viewBox="0 0 100 100"
+            preserveAspectRatio="xMidYMid slice"
+        >
+            <defs>
+                <mask id="faceMask">
+                    <rect width="100" height="100" fill="white" />
+                    <ellipse cx="50" cy="45" rx="25" ry="32" fill="black" />
+                </mask>
+            </defs>
+            <rect width="100" height="100" fill="rgba(0, 0, 0, 0.6)" mask="url(#faceMask)" />
+            <ellipse
+                cx="50"
+                cy="45"
+                rx="25"
+                ry="32"
+                fill="none"
+                stroke={strokeColor}
+                strokeWidth="1"
+                strokeDasharray="4 2"
+                className="transition-all duration-300"
+            />
+        </svg>
+    );
+};
+
+// SVG overlay component for the KTP camera
+const KtpFrame: React.FC<{ status: 'good' | 'bad' | 'neutral' }> = ({ status }) => {
+    const strokeColor = status === 'good' ? '#4ade80' : status === 'bad' ? '#f87171' : 'white';
+    // Aspect ratio of KTP is approx 85.6 : 54, which simplifies to ~1.585
+    const frameWidth = 90;
+    const frameHeight = frameWidth / 1.585;
+    const cornerRadius = 4;
+
+    return (
+        <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice">
+            <defs>
+                <mask id="ktpMask">
+                    <rect width="100" height="100" fill="white" />
+                    <rect 
+                        x={(100 - frameWidth) / 2} 
+                        y={(100 - frameHeight) / 2} 
+                        width={frameWidth} 
+                        height={frameHeight} 
+                        rx={cornerRadius} 
+                        fill="black" 
+                    />
+                </mask>
+            </defs>
+            <rect width="100" height="100" fill="rgba(0,0,0,0.7)" mask="url(#ktpMask)" />
+            <rect 
+                x={(100 - frameWidth) / 2} 
+                y={(100 - frameHeight) / 2} 
+                width={frameWidth} 
+                height={frameHeight} 
+                rx={cornerRadius}
+                fill="none"
+                stroke={strokeColor}
+                strokeWidth="0.5"
+                strokeDasharray="3 3"
+                className="transition-all duration-300"
+            />
+        </svg>
+    );
+};
+
+
 const NewRegistrationForm: React.FC<NewRegistrationFormProps> = ({ onBack }) => {
     const [formData, setFormData] = useState(initialFormData);
     const { showNotification } = useNotification();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [isCameraOpen, setIsCameraOpen] = useState(false);
+    
+    const [activeCamera, setActiveCamera] = useState<CameraMode>(null);
+    const [cameraFeedback, setCameraFeedback] = useState('');
+    const [isCaptureReady, setIsCaptureReady] = useState(false);
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const analysisFrameId = useRef<number | null>(null);
+    const lastAnalysisTimeRef = useRef(0);
+    const ANALYSIS_INTERVAL_MS = 250; 
 
     const handleStream = (stream: MediaStream) => {
       if (videoRef.current) {
@@ -83,6 +161,7 @@ const NewRegistrationForm: React.FC<NewRegistrationFormProps> = ({ onBack }) => 
              if (canvasRef.current && videoRef.current) {
                 canvasRef.current.width = videoRef.current.videoWidth;
                 canvasRef.current.height = videoRef.current.videoHeight;
+                startAnalysisLoop();
             }
         }
       }
@@ -95,82 +174,135 @@ const NewRegistrationForm: React.FC<NewRegistrationFormProps> = ({ onBack }) => 
             videoRef.current.srcObject = null;
         }
     };
+    
+    const analyzeSelfieFrame = (context: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
+        const area = { x: canvas.width * 0.25, y: canvas.height * 0.13, width: canvas.width * 0.5, height: canvas.height * 0.64 };
+        const imageData = context.getImageData(area.x, area.y, area.width, area.height).data;
+        let totalBrightness = 0, brightnessValues = [];
+        for (let i = 0; i < imageData.length; i += 4) {
+            const brightness = 0.299 * imageData[i] + 0.587 * imageData[i + 1] + 0.114 * imageData[i + 2];
+            totalBrightness += brightness;
+            brightnessValues.push(brightness);
+        }
+        const avgBrightness = totalBrightness / (imageData.length / 4);
+        const mean = avgBrightness;
+        const stdDev = Math.sqrt(brightnessValues.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / brightnessValues.length);
+        
+        if (avgBrightness < 60) return { feedback: 'Terlalu Gelap', ready: false };
+        if (stdDev < 15) return { feedback: 'Posisikan Wajah di Tengah', ready: false };
+        return { feedback: 'Bagus! Silakan ambil foto.', ready: true };
+    };
 
-    const openCamera = async () => {
-        // --- CAMERA CALIBRATION: Request HD resolution and proper aspect ratio ---
-        const constraints = {
+    const analyzeKtpFrame = (context: CanvasRenderingContext2D, canvas: HTMLCanvasElement) => {
+        const frameWidth = 0.9, frameHeight = frameWidth / 1.585;
+        const area = { x: canvas.width * (1-frameWidth)/2, y: canvas.height * (1-frameHeight)/2, width: canvas.width * frameWidth, height: canvas.height * frameHeight };
+        const imageData = context.getImageData(area.x, area.y, area.width, area.height).data;
+        let totalBrightness = 0, laplacianSum = 0, glarePixels = 0;
+        const pixelCount = imageData.length / 4;
+
+        for (let i = 0; i < imageData.length; i += 4) {
+            const r = imageData[i], g = imageData[i + 1], b = imageData[i + 2];
+            const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
+            totalBrightness += brightness;
+            if (brightness > 245) glarePixels++;
+            // Simple Laplacian for focus detection
+            if (i > 4 && i < imageData.length - 4) {
+                const prev = 0.299*imageData[i-4] + 0.587*imageData[i-3] + 0.114*imageData[i-2];
+                const next = 0.299*imageData[i+4] + 0.587*imageData[i+5] + 0.114*imageData[i+6];
+                laplacianSum += Math.abs(prev - 2 * brightness + next);
+            }
+        }
+        const avgBrightness = totalBrightness / pixelCount;
+        const focusScore = laplacianSum / pixelCount;
+        const glarePercent = (glarePixels / pixelCount) * 100;
+
+        if (avgBrightness < 70) return { feedback: 'Terlalu Gelap', ready: false };
+        if (glarePercent > 3) return { feedback: 'Terdeteksi Silau, ubah sudut KTP', ready: false };
+        if (focusScore < 3.0) return { feedback: 'Gambar buram, coba stabilkan posisi', ready: false };
+        return { feedback: 'Bagus! Silakan ambil foto.', ready: true };
+    };
+
+    const startAnalysisLoop = () => {
+        const analyzeFrame = (timestamp: number) => {
+            if (!videoRef.current || !canvasRef.current || videoRef.current.paused || videoRef.current.ended || !activeCamera) return;
+            if (timestamp - lastAnalysisTimeRef.current < ANALYSIS_INTERVAL_MS) {
+                analysisFrameId.current = requestAnimationFrame(analyzeFrame); return;
+            }
+            lastAnalysisTimeRef.current = timestamp;
+            const video = videoRef.current, canvas = canvasRef.current;
+            const context = canvas.getContext('2d', { willReadFrequently: true });
+            if (context) {
+                const isMirrored = activeCamera === 'selfie';
+                context.save();
+                if (isMirrored) { context.translate(canvas.width, 0); context.scale(-1, 1); }
+                context.drawImage(video, 0, 0, canvas.width, canvas.height);
+                context.restore();
+                
+                const result = activeCamera === 'selfie' ? analyzeSelfieFrame(context, canvas) : analyzeKtpFrame(context, canvas);
+                setCameraFeedback(result.feedback);
+                setIsCaptureReady(result.ready);
+            }
+            analysisFrameId.current = requestAnimationFrame(analyzeFrame);
+        };
+        analysisFrameId.current = requestAnimationFrame(analyzeFrame);
+    };
+
+    const stopAnalysisLoop = () => { if (analysisFrameId.current) cancelAnimationFrame(analysisFrameId.current); };
+
+    const openCamera = async (mode: CameraMode) => {
+        const isSelfie = mode === 'selfie';
+        const constraints: MediaStreamConstraints = {
             video: {
-                facingMode: 'user',
+                facingMode: isSelfie ? 'user' : 'environment',
                 width: { ideal: 1280 },
                 height: { ideal: 720 },
                 aspectRatio: { ideal: 16 / 9 }
             }
         };
-
+        setCameraFeedback(isSelfie ? 'Posisikan wajah Anda...' : 'Posisikan KTP Anda...');
+        setIsCaptureReady(false);
         try {
-            // Try with ideal constraints first
             const stream = await navigator.mediaDevices.getUserMedia(constraints);
-            setIsCameraOpen(true);
+            setActiveCamera(mode);
             setTimeout(() => handleStream(stream), 100);
         } catch (err) {
-            console.warn("Ideal camera constraints failed, trying default:", err);
-            try {
-                // Fallback to default if HD is not supported
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-                setIsCameraOpen(true);
-                setTimeout(() => handleStream(stream), 100);
-            } catch (fallbackErr) {
-                console.error("Camera access denied:", fallbackErr);
-                showNotification("Gagal mengakses kamera. Pastikan Anda memberikan izin.", 'error');
-            }
+            console.error("Camera access failed:", err);
+            showNotification("Gagal mengakses kamera. Pastikan Anda memberikan izin.", 'error');
         }
     };
 
     const closeCamera = () => {
+        stopAnalysisLoop();
         stopStream();
-        setIsCameraOpen(false);
+        setActiveCamera(null);
+        setIsCaptureReady(false);
     };
     
-    const captureSelfie = () => {
-        if (videoRef.current && canvasRef.current) {
-            const video = videoRef.current;
-            const canvas = canvasRef.current;
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
+    const captureImage = () => {
+        if (videoRef.current && canvasRef.current && activeCamera) {
+            const video = videoRef.current, canvas = canvasRef.current;
             const context = canvas.getContext('2d');
             if (context) {
-                // --- CAMERA CALIBRATION: Flip context horizontally to un-mirror the selfie ---
-                context.translate(canvas.width, 0);
-                context.scale(-1, 1);
+                const isMirrored = activeCamera === 'selfie';
+                context.save();
+                if (isMirrored) { context.translate(canvas.width, 0); context.scale(-1, 1); }
                 context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                
-                // Reset transform to avoid affecting other canvas operations if any
-                context.setTransform(1, 0, 0, 1, 0, 0);
-
-                const dataUrl = canvas.toDataURL('image/jpeg', 0.9); // Use 0.9 for better quality
-                setFormData(prev => ({ ...prev, selfiePhoto: dataUrl }));
+                context.restore();
+                const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+                if (activeCamera === 'selfie') setFormData(prev => ({ ...prev, selfiePhoto: dataUrl }));
+                else setFormData(prev => ({ ...prev, ktpPhoto: dataUrl }));
             }
             closeCamera();
         }
     };
     
-    const retakeSelfie = () => {
-        setFormData(prev => ({ ...prev, selfiePhoto: null }));
-        openCamera();
-    };
-
-    const handleKtpChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            setFormData(prev => ({ ...prev, ktpPhoto: file }));
-        }
-    };
+    const retakeSelfie = () => { setFormData(prev => ({ ...prev, selfiePhoto: null })); openCamera('selfie'); };
+    const retakeKtp = () => { setFormData(prev => ({ ...prev, ktpPhoto: null })); openCamera('ktp'); };
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
         if (name === 'nationalId' || name === 'phoneNumber' || name === 'bankAccountNumber') {
-            const numericValue = value.replace(/[^0-9]/g, '');
-            setFormData(prev => ({ ...prev, [name]: numericValue }));
+            setFormData(prev => ({ ...prev, [name]: value.replace(/[^0-9]/g, '') }));
         } else {
             setFormData(prev => ({ ...prev, [name]: value }));
         }
@@ -178,81 +310,37 @@ const NewRegistrationForm: React.FC<NewRegistrationFormProps> = ({ onBack }) => 
     
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-    
-        if (formData.nationalId.length !== 16) {
-            showNotification('NIK KTP wajib 16 digit.', 'error');
-            return;
-        }
-        if (!formData.ktpPhoto) {
-            showNotification('Foto KTP wajib di-upload.', 'error');
-            return;
-        }
-        if (!formData.selfiePhoto) {
-            showNotification('Foto Selfie wajib diambil.', 'error');
-            return;
-        }
-        
+        if (formData.nationalId.length !== 16) { showNotification('NIK KTP wajib 16 digit.', 'error'); return; }
+        if (!formData.ktpPhoto) { showNotification('Foto KTP wajib diambil.', 'error'); return; }
+        if (!formData.selfiePhoto) { showNotification('Foto Selfie wajib diambil.', 'error'); return; }
         setIsSubmitting(true);
-    
         try {
-            // 1. Cek Duplikat NIK
-            const { data: existingData, error: checkError } = await supabase
-                .from('registrants')
-                .select('id')
-                .eq('nik', formData.nationalId)
-                .single();
-    
-            if (checkError && checkError.code !== 'PGRST116') throw checkError;
-            if (existingData) {
-                throw new Error('NIK ini sudah terdaftar. Hubungi admin jika ada kesalahan.');
-            }
-    
-            // 2. Upload KTP Photo
-            const ktpFileName = `ktp-${formData.nationalId}-${Date.now()}.jpg`;
-            const ktpFilePath = `public/${ktpFileName}`;
-            const { error: ktpUploadError } = await supabase.storage
-                .from('registrant-documents')
-                .upload(ktpFilePath, formData.ktpPhoto);
-            if (ktpUploadError) throw new Error(`Gagal upload KTP: ${ktpUploadError.message}`);
-            const { data: { publicUrl: ktpPublicUrl } } = supabase.storage
-                .from('registrant-documents')
-                .getPublicUrl(ktpFilePath);
+            const { data: existingData } = await supabase.from('registrants').select('id').eq('nik', formData.nationalId).single();
+            if (existingData) throw new Error('NIK ini sudah terdaftar.');
+
+            const timestamp = Date.now();
+            const ktpFile = dataURLtoFile(formData.ktpPhoto, `ktp-${formData.nationalId}-${timestamp}.jpg`);
+            const selfieFile = dataURLtoFile(formData.selfiePhoto, `selfie-${formData.nationalId}-${timestamp}.jpg`);
+
+            const [ktpUploadResult, selfieUploadResult] = await Promise.all([
+                supabase.storage.from('registrant-documents').upload(`public/ktp-${ktpFile.name}`, ktpFile),
+                supabase.storage.from('registrant-documents').upload(`public/selfie-${selfieFile.name}`, selfieFile)
+            ]);
+
+            if (ktpUploadResult.error) throw new Error(`Gagal upload KTP: ${ktpUploadResult.error.message}`);
+            if (selfieUploadResult.error) throw new Error(`Gagal upload Selfie: ${selfieUploadResult.error.message}`);
             
-            // 3. Upload Selfie Photo
-            const selfieFile = dataURLtoFile(formData.selfiePhoto, `selfie-${formData.nationalId}-${Date.now()}.jpg`);
-            const selfieFilePath = `public/selfie-${formData.nationalId}-${Date.now()}.jpg`;
-            const { error: selfieUploadError } = await supabase.storage
-                .from('registrant-documents')
-                .upload(selfieFilePath, selfieFile);
-            if (selfieUploadError) throw new Error(`Gagal upload Selfie: ${selfieUploadError.message}`);
-             const { data: { publicUrl: selfiePublicUrl } } = supabase.storage
-                .from('registrant-documents')
-                .getPublicUrl(selfieFilePath);
-    
-            // 4. Insert Data to DB
-            const { error: insertError } = await supabase
-              .from('registrants')
-              .insert([{
-                  full_name: formData.fullName,
-                  nik: formData.nationalId,
-                  religion: formData.religion,
-                  phone: formData.phoneNumber,
-                  bank_name: formData.bankName,
-                  bank_account_name: formData.bankAccountName,
-                  bank_account_number: formData.bankAccountNumber,
-                  contract_type: formData.contractType,
-                  agency: formData.agency,
-                  department: formData.department,
-                  station_id: formData.stationId,
-                  info_source: formData.infoSource,
-                  ktp_image_url: ktpPublicUrl,
-                  selfie_image_url: selfiePublicUrl,
-              }]);
-            
+            const { data: { publicUrl: ktpPublicUrl } } = supabase.storage.from('registrant-documents').getPublicUrl(ktpUploadResult.data.path);
+            const { data: { publicUrl: selfiePublicUrl } } = supabase.storage.from('registrant-documents').getPublicUrl(selfieUploadResult.data.path);
+
+            const { error: insertError } = await supabase.from('registrants').insert([{
+                full_name: formData.fullName, nik: formData.nationalId, religion: formData.religion, phone: formData.phoneNumber,
+                bank_name: formData.bankName, bank_account_name: formData.bankAccountName, bank_account_number: formData.bankAccountNumber,
+                contract_type: formData.contractType, agency: formData.agency, department: formData.department, station_id: formData.stationId,
+                info_source: formData.infoSource, ktp_image_url: ktpPublicUrl, selfie_image_url: selfiePublicUrl,
+            }]);
             if (insertError) throw insertError;
-    
             setIsModalOpen(true);
-    
         } catch (err: any) {
             showNotification(`Gagal menyimpan data: ${err.message || 'Terjadi kesalahan'}`, 'error');
         } finally {
@@ -261,28 +349,11 @@ const NewRegistrationForm: React.FC<NewRegistrationFormProps> = ({ onBack }) => 
     };
 
     const handleWhatsAppRedirect = (targetPhoneNumber: string) => {
-        const message = `
-Halo Pak Korlap,
-Saya sudah mendaftar sebagai Daily Worker baru melalui form online.
-
-Berikut data saya:
-- *Nama Lengkap*: ${formData.fullName}
-- *National ID (NIK)*: ${formData.nationalId}
-- *Info Dari*: ${formData.infoSource}
-
-Dokumen KTP dan Selfie sudah di-upload melalui sistem.
-Mohon untuk diproses lebih lanjut. Terima kasih.
-        `.trim();
-
-        const encodedMessage = encodeURIComponent(message);
-        window.open(`https://wa.me/${targetPhoneNumber}?text=${encodedMessage}`, '_blank');
+        const message = `Halo Pak Korlap,\nSaya sudah mendaftar sebagai Daily Worker baru melalui form online.\n\nBerikut data saya:\n- *Nama Lengkap*: ${formData.fullName}\n- *National ID (NIK)*: ${formData.nationalId}\n- *Info Dari*: ${formData.infoSource}\n\nDokumen KTP dan Selfie sudah di-upload melalui sistem.\nMohon untuk diproses lebih lanjut. Terima kasih.`.trim();
+        window.open(`https://wa.me/${targetPhoneNumber}?text=${encodeURIComponent(message)}`, '_blank');
     };
 
-    const handleCloseModal = () => {
-        setIsModalOpen(false);
-        setFormData(initialFormData); // Reset form
-        onBack();
-    };
+    const handleCloseModal = () => { setIsModalOpen(false); setFormData(initialFormData); onBack(); };
 
   return (
     <>
@@ -291,7 +362,6 @@ Mohon untuk diproses lebih lanjut. Terima kasih.
       <p className="text-gray-600 mb-8 text-center">Pastikan semua data diisi dengan benar dan sesuai dengan dokumen Anda.</p>
       
       <form onSubmit={handleSubmit}>
-        
         <FormRow>
             <Label htmlFor="fullName" required>Nama Lengkap</Label>
             <Input id="fullName" name="fullName" type="text" value={formData.fullName} onChange={handleChange} required />
@@ -304,12 +374,8 @@ Mohon untuk diproses lebih lanjut. Terima kasih.
             <Label htmlFor="religion" required>Agama</Label>
             <Select id="religion" name="religion" value={formData.religion} onChange={handleChange} required>
                 <option value="" disabled>Pilih Agama</option>
-                <option value="Buddha">Buddha</option>
-                <option value="Catholic">Catholic</option>
-                <option value="Christian">Christian</option>
-                <option value="Confucianism">Confucianism</option>
-                <option value="Islam">Islam</option>
-                <option value="Hindu">Hindu</option>
+                <option value="Islam">Islam</option><option value="Christian">Christian</option><option value="Catholic">Catholic</option>
+                <option value="Hindu">Hindu</option><option value="Buddha">Buddha</option><option value="Confucianism">Confucianism</option>
             </Select>
         </FormRow>
         <FormRow>
@@ -320,21 +386,17 @@ Mohon untuk diproses lebih lanjut. Terima kasih.
             <Label htmlFor="infoSource" required>Dapat Info Lowongan Dari?</Label>
             <Select id="infoSource" name="infoSource" value={formData.infoSource} onChange={handleChange} required>
                 <option value="" disabled>Pilih Sumber Informasi</option>
-                <option value="Facebook">Facebook</option>
-                <option value="Instagram">Instagram</option>
-                <option value="WhatsApp Status/Group">WhatsApp Status/Group</option>
-                <option value="Teman/Kerabat">Teman/Kerabat</option>
-                <option value="Lainnya">Lainnya</option>
+                <option value="Facebook">Facebook</option><option value="Instagram">Instagram</option><option value="WhatsApp Status/Group">WhatsApp Status/Group</option>
+                <option value="Teman/Kerabat">Teman/Kerabat</option><option value="Lainnya">Lainnya</option>
             </Select>
         </FormRow>
         <FormRow>
             <Label htmlFor="bankName" required>Nama Bank</Label>
             <Select id="bankName" name="bankName" value={formData.bankName} onChange={handleChange} required>
                 <option value="" disabled>Pilih Bank</option>
-                <option value="BCA">BCA</option><option value="BNI">BNI</option><option value="BRI">BRI</option><option value="Mandiri">Mandiri</option>
-                <option value="BSI">BSI</option><option value="CIMB Niaga">CIMB Niaga</option><option value="Danamon">Danamon</option><option value="Permata">Permata</option>
-                <option value="BCA Digital">BCA Digital</option><option value="Bank Jago">Bank Jago</option><option value="SeaBank">SeaBank</option>
-                <option value="Lainnya">Bank Lainnya</option>
+                <option value="BCA">BCA</option><option value="BNI">BNI</option><option value="BRI">BRI</option><option value="Mandiri">Mandiri</option><option value="BSI">BSI</option>
+                <option value="CIMB Niaga">CIMB Niaga</option><option value="Danamon">Danamon</option><option value="Permata">Permata</option><option value="BCA Digital">BCA Digital</option>
+                <option value="Bank Jago">Bank Jago</option><option value="SeaBank">SeaBank</option><option value="Lainnya">Bank Lainnya</option>
             </Select>
         </FormRow>
         <FormRow>
@@ -345,29 +407,27 @@ Mohon untuk diproses lebih lanjut. Terima kasih.
             <Label htmlFor="bankAccountNumber" required>Nomor Rekening</Label>
             <Input id="bankAccountNumber" name="bankAccountNumber" type="text" value={formData.bankAccountNumber} onChange={handleChange} required />
         </FormRow>
+        
         <FormRow>
             <Label htmlFor="ktpPhoto" required>Foto KTP</Label>
             <div className="md:col-span-2 space-y-3">
                 {formData.ktpPhoto ? (
-                     <div className="flex items-center gap-4">
-                        <img src={URL.createObjectURL(formData.ktpPhoto)} alt="KTP Preview" className="h-20 w-auto rounded-md border p-1" />
-                        <div className="text-sm">
-                            <p className="font-semibold text-green-700">File Terpilih:</p>
-                            <p className="text-slate-600 truncate">{formData.ktpPhoto.name}</p>
-                        </div>
+                    <div className="flex items-center gap-4">
+                        <img src={formData.ktpPhoto} alt="KTP Preview" className="h-20 w-auto rounded-md border p-1 object-contain" />
+                        <button type="button" onClick={retakeKtp} className="inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-md hover:bg-slate-200 transition-colors font-semibold">
+                            <ArrowUturnLeftIcon className="w-5 h-5" />
+                            Ulangi Foto KTP
+                        </button>
                     </div>
                 ) : (
-                    <div className="w-full h-24 border-2 border-dashed border-gray-300 rounded-md flex items-center justify-center text-gray-500">
-                       <IdentificationIcon className="w-8 h-8 mr-2" /> Preview akan muncul di sini
-                    </div>
+                    <button type="button" onClick={() => openCamera('ktp')} className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors font-semibold shadow">
+                       <IdentificationIcon className="w-5 h-5"/>
+                       Ambil Foto KTP
+                    </button>
                 )}
-                <label htmlFor="ktp-upload" className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-md hover:bg-slate-200 transition-colors font-semibold">
-                     <CloudArrowUpIcon className="w-5 h-5"/>
-                    {formData.ktpPhoto ? 'Ganti File KTP' : 'Pilih File KTP'}
-                </label>
-                <input id="ktp-upload" type="file" accept="image/*" className="hidden" onChange={handleKtpChange} />
             </div>
         </FormRow>
+        
         <FormRow>
             <Label htmlFor="selfiePhoto" required>Foto Selfie</Label>
              <div className="md:col-span-2 space-y-3">
@@ -380,45 +440,36 @@ Mohon untuk diproses lebih lanjut. Terima kasih.
                         </button>
                     </div>
                 ) : (
-                    <button type="button" onClick={openCamera} className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors font-semibold shadow">
+                    <button type="button" onClick={() => openCamera('selfie')} className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors font-semibold shadow">
                        <CameraIcon className="w-5 h-5"/>
                        Buka Kamera untuk Selfie
                     </button>
                 )}
             </div>
         </FormRow>
+
         <FormRow>
-            <Label htmlFor="contractType" required>Contract Type</Label>
-            <Input id="contractType" name="contractType" value={formData.contractType} onChange={handleChange} required readOnly className="bg-slate-200 text-slate-500"/>
+            <Label htmlFor="contractType">Contract Type</Label>
+            <Input id="contractType" name="contractType" value={formData.contractType} readOnly className="bg-slate-200 text-slate-500"/>
         </FormRow>
         <FormRow>
-            <Label htmlFor="agency" required>Agency</Label>
-            <Input id="agency" name="agency" value={formData.agency} onChange={handleChange} required readOnly className="bg-slate-200 text-slate-500"/>
+            <Label htmlFor="agency">Agency</Label>
+            <Input id="agency" name="agency" value={formData.agency} readOnly className="bg-slate-200 text-slate-500"/>
         </FormRow>
         <FormRow>
-            <Label htmlFor="department" required>Department</Label>
-            <Input id="department" name="department" value={formData.department} onChange={handleChange} required readOnly className="bg-slate-200 text-slate-500"/>
+            <Label htmlFor="department">Department</Label>
+            <Input id="department" name="department" value={formData.department} readOnly className="bg-slate-200 text-slate-500"/>
         </FormRow>
         <FormRow>
-            <Label htmlFor="stationId" required>Attendance Station ID</Label>
-            <Input id="stationId" name="stationId" value={formData.stationId} onChange={handleChange} required readOnly className="bg-slate-200 text-slate-500"/>
+            <Label htmlFor="stationId">Attendance Station ID</Label>
+            <Input id="stationId" name="stationId" value={formData.stationId} readOnly className="bg-slate-200 text-slate-500"/>
         </FormRow>
 
         <div className="flex flex-col md:flex-row items-center justify-between pt-8 gap-4">
-            <button
-                type="button"
-                onClick={onBack}
-                disabled={isSubmitting}
-                className="w-full md:w-auto px-6 py-2 text-orange-600 font-semibold border border-orange-600 rounded-lg hover:bg-orange-50 transition-colors flex items-center justify-center space-x-2 disabled:opacity-50"
-            >
-                <ArrowLeftIcon className="w-5 h-5" />
-                <span>Kembali</span>
+            <button type="button" onClick={onBack} disabled={isSubmitting} className="w-full md:w-auto px-6 py-2 text-orange-600 font-semibold border border-orange-600 rounded-lg hover:bg-orange-50 transition-colors flex items-center justify-center space-x-2 disabled:opacity-50">
+                <ArrowLeftIcon className="w-5 h-5" /><span>Kembali</span>
             </button>
-            <button
-                type="submit"
-                disabled={isSubmitting}
-                className="w-full md:w-auto px-8 py-3 bg-orange-600 text-white font-bold rounded-lg shadow-md hover:bg-orange-700 transition-colors disabled:bg-gray-400"
-            >
+            <button type="submit" disabled={isSubmitting} className="w-full md:w-auto px-8 py-3 bg-orange-600 text-white font-bold rounded-lg shadow-md hover:bg-orange-700 transition-colors disabled:bg-gray-400">
                 {isSubmitting ? 'Sedang Memproses...' : 'Kirim Pendaftaran'}
             </button>
         </div>
@@ -426,48 +477,35 @@ Mohon untuk diproses lebih lanjut. Terima kasih.
     </div>
     
     <Modal isOpen={isModalOpen} onClose={handleCloseModal} title="Pendaftaran Siap Dikonfirmasi">
-        <p className="text-gray-600 mb-2 text-center">
-            Data dan dokumen Anda telah berhasil disimpan. Silakan pilih salah satu Korlap untuk konfirmasi melalui WhatsApp.
-        </p>
+        <p className="text-gray-600 mb-2 text-center">Data dan dokumen Anda telah berhasil disimpan. Silakan pilih salah satu Korlap untuk konfirmasi melalui WhatsApp.</p>
         <div className="bg-orange-50 border border-orange-200 rounded p-3 mb-6 text-center">
-             <p className="text-sm text-orange-800 font-medium italic">
-                Note: wa aja ya jangan telepon pasti di bales
-            </p>
+             <p className="text-sm text-orange-800 font-medium italic">Note: wa aja ya jangan telepon pasti di bales</p>
         </div>
-       
         <div className="flex flex-col gap-3">
-            <button
-                onClick={() => handleWhatsAppRedirect('6287787460647')}
-                className="w-full px-6 py-3 bg-green-500 text-white font-bold rounded-lg shadow-md hover:bg-green-600 transition-colors flex items-center justify-center space-x-3"
-            >
-                <WhatsappIcon className="w-6 h-6" />
-                <span>Hubungi Pak Korlap 1</span>
+            <button onClick={() => handleWhatsAppRedirect('6287787460647')} className="w-full px-6 py-3 bg-green-500 text-white font-bold rounded-lg shadow-md hover:bg-green-600 transition-colors flex items-center justify-center space-x-3">
+                <WhatsappIcon className="w-6 h-6" /><span>Hubungi Pak Korlap 1</span>
             </button>
-            <button
-                onClick={() => handleWhatsAppRedirect('6285890285218')}
-                className="w-full px-6 py-3 bg-green-500 text-white font-bold rounded-lg shadow-md hover:bg-green-600 transition-colors flex items-center justify-center space-x-3"
-            >
-                <WhatsappIcon className="w-6 h-6" />
-                <span>Hubungi Pak Korlap 2</span>
+            <button onClick={() => handleWhatsAppRedirect('6285890285218')} className="w-full px-6 py-3 bg-green-500 text-white font-bold rounded-lg shadow-md hover:bg-green-600 transition-colors flex items-center justify-center space-x-3">
+                <WhatsappIcon className="w-6 h-6" /><span>Hubungi Pak Korlap 2</span>
             </button>
-            <button
-                onClick={handleCloseModal}
-                className="w-full px-6 py-2 mt-2 text-slate-700 font-semibold hover:bg-slate-100 transition-colors rounded-lg"
-            >
-                Tutup dan Kembali
-            </button>
+            <button onClick={handleCloseModal} className="w-full px-6 py-2 mt-2 text-slate-700 font-semibold hover:bg-slate-100 transition-colors rounded-lg">Tutup dan Kembali</button>
         </div>
     </Modal>
     
-    <Modal isOpen={isCameraOpen} onClose={closeCamera} title="Ambil Foto Selfie">
-        {/* Container with fixed aspect ratio to prevent distortion */}
-        <div className="bg-black rounded-lg overflow-hidden aspect-video w-full">
-            {/* Video element is mirrored and covers the container */}
-            <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover transform -scale-x-100" />
+    <Modal isOpen={!!activeCamera} onClose={closeCamera} title={activeCamera === 'selfie' ? 'Ambil Foto Selfie' : 'Ambil Foto KTP'}>
+        <div className="relative bg-black rounded-lg overflow-hidden aspect-video w-full">
+            <video ref={videoRef} autoPlay playsInline className={`w-full h-full object-cover ${activeCamera === 'selfie' ? 'transform -scale-x-100' : ''}`} />
             <canvas ref={canvasRef} className="hidden" />
+            
+            {activeCamera === 'selfie' && <FaceFrame status={isCaptureReady ? 'good' : cameraFeedback.includes('Gelap') ? 'bad' : 'neutral'} />}
+            {activeCamera === 'ktp' && <KtpFrame status={isCaptureReady ? 'good' : !cameraFeedback.includes('Bagus') ? 'bad' : 'neutral'} />}
+            
+            <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/60 to-transparent text-center">
+                 <p className={`font-semibold text-lg drop-shadow-md transition-colors ${isCaptureReady ? 'text-green-400' : 'text-white'}`}>{cameraFeedback}</p>
+            </div>
         </div>
-        <button
-            onClick={captureSelfie}
+        <button 
+            onClick={captureImage} 
             className="w-full mt-4 px-6 py-3 bg-orange-600 text-white font-bold rounded-lg shadow-md hover:bg-orange-700 transition-colors flex items-center justify-center space-x-3"
         >
             <CameraIcon className="w-6 h-6" />
