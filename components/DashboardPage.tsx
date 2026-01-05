@@ -1424,8 +1424,7 @@ const DashboardPage: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                     { val: reg.bankAccountNumber, forceText: true },
                     { val: reg.agency },
                     { val: reg.department },
-                    { val: reg.stationId },
-                    { val: reg.infoSource } // Include Info Source in Copy
+                    { val: reg.stationId }, // Include Info Source in Copy
                 ];
             } else {
                 const mut = data as Mutation;
