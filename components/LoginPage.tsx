@@ -14,7 +14,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onBackToHome }) =
     e.preventDefault();
     setError('');
 
-    if (id === 'Nexus Sunter' && password === '1234') {
+    if (id === 'Nexus Sunter' && password === 'nexus123') {
       onLoginSuccess();
     } else {
       setError('ID atau Password salah. Silakan coba lagi.');
